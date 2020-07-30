@@ -1,0 +1,1 @@
+cl /D_DEBUG /D_WIN64 /Zi character_creation.c /I freetype2/include ftsystem.lib Gdi32.lib user32.lib

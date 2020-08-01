@@ -297,6 +297,7 @@ void draw_uint8(Rect*clip_rect, uint8_t value, int32_t origin_x, int32_t origin_
 #define SPEND_DIE_BUTTON_ID 0b1100000
 #define UNSPEND_DIE_BUTTON_ID 0b10000000
 #define UNSPENT_DICE_TABLE_ID 0b10100000
+#define TABS_ID 0b11000000
 
 uint32_t g_clicked_control_id = 0;
 int32_t g_cursor_x;
@@ -351,6 +352,27 @@ bool do_button_action(Rect*clip_rect, uint32_t control_id, int32_t min_x, int32_
     return false;
 }
 
+void select_table_row(Rect*clip_rect, size_t*selected_row_index, size_t table_row_count,
+    int32_t table_min_x, int32_t table_min_y, uint32_t table_width, uint32_t table_id)
+{
+    if (g_cursor_y >= table_min_y)
+    {
+        size_t row_index = (g_cursor_y - table_min_y) / g_table_row_height;
+        if (row_index < table_row_count &&
+            do_button_action(clip_rect, table_id | row_index, table_min_x,
+                table_min_y + row_index * g_table_row_height, table_width, g_table_row_height))
+        {
+            *selected_row_index = row_index;
+        }
+        if ((g_clicked_control_id & PARENT_CONTROL_ID_MASK) == table_id)
+        {
+            do_button_action(clip_rect, g_clicked_control_id, table_min_x,
+                table_min_y + (g_clicked_control_id & CHILD_CONTROL_ID_MASK) * g_table_row_height,
+                table_width, g_table_row_height);
+        }
+    }
+}
+
 char*g_die_denominations[] = { "D4", "D6", "D8", "D10", "D12" };
 
 typedef struct Skill
@@ -378,6 +400,10 @@ uint8_t g_unspent_dice[] = { 1, 3, 2 };
 Grid g_unspent_dice_table =
 { ARRAY_COUNT(g_unspent_dice), 2, (uint32_t[ARRAY_COUNT(g_unspent_dice) + 1]) { 0 } };
 size_t g_selected_die_denomination_index = ARRAY_COUNT(g_unspent_dice);
+
+char*g_tab_names[] = { "Allocate Trait Dice", "Allocate Marks" };
+uint32_t g_tab_width;
+size_t g_selected_tab_index = 0;
 
 void scale_window_contents(HWND window_handle, WORD dpi)
 {
@@ -429,6 +455,8 @@ void scale_window_contents(HWND window_handle, WORD dpi)
     {
         g_unspent_dice_table.column_offsets[i] = i * die_column_width;
     }
+    g_tab_width = g_line_thickness + 2 * g_text_padding +
+        max32(get_string_width(g_tab_names[0]), get_string_width(g_tab_names[1]));
 }
 
 LRESULT CALLBACK create_character_proc(HWND window_handle, UINT message, WPARAM w_param,
@@ -615,24 +643,9 @@ int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handl
         uint32_t dice_cells_width =
             ARRAY_COUNT(g_die_denominations) * die_column_width - g_line_thickness;
         int32_t skill_table_content_min_y = skill_table_min_y - g_skill_table_viewport_offset;
-        if (g_cursor_y >= skill_table_viewport.min_y)
-        {
-            size_t skill_index = (g_cursor_y - skill_table_content_min_y) / g_table_row_height;
-            if (skill_index < ARRAY_COUNT(g_skills) &&
-                do_button_action(&skill_table_viewport, SKILL_TABLE_ID | skill_index, cell_height,
-                    skill_table_content_min_y + skill_index * g_table_row_height,
-                    g_skill_table.column_offsets[g_skill_table.column_count], g_table_row_height))
-            {
-                g_selected_skill_index = skill_index;
-            }
-        }
-        if ((g_clicked_control_id & PARENT_CONTROL_ID_MASK) == SKILL_TABLE_ID)
-        {
-            do_button_action(&skill_table_viewport, g_clicked_control_id, cell_height,
-                skill_table_content_min_y +
-                    (g_clicked_control_id & CHILD_CONTROL_ID_MASK) * g_table_row_height,
-                g_skill_table.column_offsets[g_skill_table.column_count], g_table_row_height);
-        }
+        select_table_row(&skill_table_viewport, &g_selected_skill_index, ARRAY_COUNT(g_skills),
+            cell_height, skill_table_content_min_y,
+            g_skill_table.column_offsets[g_skill_table.column_count], SKILL_TABLE_ID);
         if (g_selected_skill_index < ARRAY_COUNT(g_skills))
         {
             draw_filled_rectangle(&skill_table_viewport,
@@ -657,7 +670,7 @@ int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handl
                 g_table_row_height + g_skill_table.column_offsets[i + 2],
                 skill_table_min_y - g_text_padding, die_cell_width);
         }
-        draw_horizontally_centered_string("Dice", &g_window_rect,
+        draw_horizontally_centered_string("Trait Dice", &g_window_rect,
             g_table_row_height + g_skill_table.column_offsets[2], cell_height - g_text_padding,
             dice_cells_width);
         int32_t row_text_y = skill_table_content_min_y - g_text_padding;
@@ -685,19 +698,22 @@ int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handl
         if (g_cursor_x >= unspent_dice_cell_min_x)
         {
             size_t die_index = (g_cursor_x - unspent_dice_cell_min_x) / die_column_width;
-            if (die_index < 3 &&
-                do_button_action(&g_window_rect, UNSPENT_DICE_TABLE_ID | die_index,
+            if (die_index < 3)
+            {
+                if (do_button_action(&g_window_rect, UNSPENT_DICE_TABLE_ID | die_index,
                     unspent_dice_table_min_x + die_index * die_column_width,
                     skill_table_content_min_y, die_column_width, unspent_dice_table_height))
-            {
-                g_selected_die_denomination_index = die_index;
+                {
+                    g_selected_die_denomination_index = die_index;
+                }
             }
-        }
-        if ((g_clicked_control_id & PARENT_CONTROL_ID_MASK) == UNSPENT_DICE_TABLE_ID)
-        {
-            do_button_action(&g_window_rect, g_clicked_control_id, unspent_dice_table_min_x +
-                (g_clicked_control_id & CHILD_CONTROL_ID_MASK) * die_column_width,
-                skill_table_content_min_y, die_column_width, unspent_dice_table_height);
+            if ((g_clicked_control_id & PARENT_CONTROL_ID_MASK) == UNSPENT_DICE_TABLE_ID)
+            {
+                do_button_action(&g_window_rect, g_clicked_control_id,
+                    unspent_dice_table_min_x +
+                    (g_clicked_control_id & CHILD_CONTROL_ID_MASK) * die_column_width,
+                    skill_table_content_min_y, die_column_width, unspent_dice_table_height);
+            }
         }
         if (g_selected_die_denomination_index < 3)
         {
@@ -710,8 +726,8 @@ int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handl
         uint32_t unspent_dice_cells_width =
             g_unspent_dice_table.column_offsets[g_unspent_dice_table.column_count] -
             g_line_thickness;
-        draw_horizontally_centered_string("Unspent Dice", &g_window_rect, unspent_dice_cell_min_x,
-            skill_table_min_y - g_text_padding, unspent_dice_cells_width);
+        draw_horizontally_centered_string("Unallocated Dice", &g_window_rect,
+            unspent_dice_cell_min_x, skill_table_min_y - g_text_padding, unspent_dice_cells_width);
         int32_t cell_x = unspent_dice_cell_min_x;
         int32_t unspend_die_button_min_y = skill_table_min_y + g_table_row_height;
         row_text_y = unspend_die_button_min_y - g_text_padding;
@@ -774,6 +790,26 @@ int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handl
                 g_left_arrowhead_rasterization.bitmap.width) / 2,
             skill_table_min_y + (g_table_row_height + g_line_thickness -
                 g_left_arrowhead_rasterization.bitmap.rows) / 2, spend_die_border_color);
+        int32_t tab_cell_min_x = client_rect.right - g_tab_width;
+        uint32_t tab_cell_width = g_tab_width - g_line_thickness;
+        int32_t tab_min_x = tab_cell_min_x - g_line_thickness;
+        int32_t tab_min_y = -(int32_t)g_line_thickness;
+        select_table_row(&g_window_rect, &g_selected_tab_index, ARRAY_COUNT(g_tab_names), tab_min_x,
+            tab_min_y, g_tab_width, TABS_ID);
+        for (size_t i = 0; i < ARRAY_COUNT(g_tab_names); ++i)
+        {
+            tab_min_y += g_table_row_height;
+            draw_horizontally_centered_string(g_tab_names[i], &g_window_rect, tab_cell_min_x,
+                tab_min_y - g_text_padding, tab_cell_width);
+            draw_filled_rectangle(&g_window_rect, tab_cell_min_x, tab_min_y, tab_cell_width,
+                g_line_thickness, g_black);
+        }
+        draw_filled_rectangle(&g_window_rect, tab_min_x, 0, g_line_thickness, client_rect.bottom,
+            g_black);
+        draw_filled_rectangle(&g_window_rect, tab_min_x, g_selected_tab_index * g_table_row_height,
+            g_line_thickness, cell_height, g_dark_gray);
+        draw_filled_rectangle(&g_window_rect, client_rect.right - g_line_thickness, 0,
+            g_line_thickness, ARRAY_COUNT(g_tab_names) * g_table_row_height, g_black);
         StretchDIBits(device_context, 0, 0, g_window_rect.width, g_window_rect.height, 0, 0,
             client_rect.right - client_rect.left, client_rect.bottom - client_rect.top,
             g_pixels, &g_pixel_buffer_info, DIB_RGB_COLORS, SRCCOPY);

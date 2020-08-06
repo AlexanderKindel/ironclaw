@@ -313,11 +313,13 @@ void draw_uint8(Rect*clip_rect, uint8_t value, int32_t origin_x, int32_t origin_
 
 #define UNALLOCATED_MARKS_TABLE_ID 0b11000000
 
+uint32_t g_text_lines_per_mouse_wheel_notch;
 uint32_t g_clicked_control_id = 0;
 int32_t g_cursor_x;
 int32_t g_cursor_y;
 bool g_left_mouse_button_is_down = false;
 bool g_left_mouse_button_changed_state = false;
+int16_t g_120ths_of_mouse_wheel_notches_turned = 0;
 
 bool do_button_action(Rect*clip_rect, uint32_t control_id, int32_t min_x, int32_t min_y,
     uint32_t width, uint32_t height)
@@ -502,6 +504,9 @@ LRESULT CALLBACK create_character_proc(HWND window_handle, UINT message, WPARAM 
         g_cursor_x = GET_X_LPARAM(l_param);
         g_cursor_y = GET_Y_LPARAM(l_param);
         return 0;
+    case WM_MOUSEWHEEL:
+        g_120ths_of_mouse_wheel_notches_turned = GET_WHEEL_DELTA_WPARAM(w_param);
+        return 0;
     case WM_SIZE:
     {
         RECT client_rect;
@@ -532,6 +537,7 @@ HWND init(HINSTANCE instance_handle)
     {
         g_page_size = system_info.dwPageSize;
     }
+    SystemParametersInfo(SPI_GETWHEELSCROLLLINES, 0, &g_text_lines_per_mouse_wheel_notch, 0);
     g_stack.start = VirtualAlloc(0, UINT32_MAX, MEM_RESERVE, PAGE_READWRITE);
     g_stack.end = (uint8_t*)g_stack.start + UINT32_MAX;
     g_stack.cursor = g_stack.start;
@@ -646,13 +652,23 @@ int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handl
             uint32_t max_thumb_offset = skill_table_viewport.height - thumb_height;
             uint32_t max_viewport_offset = skill_table_cells_height - skill_table_viewport.height;
             int32_t thumb_min_y = skill_table_viewport.min_y;
+            if (g_cursor_x >= skill_table_viewport.min_x &&
+                g_cursor_x < skill_table_viewport.min_x + skill_table_viewport.height &&
+                g_cursor_y >= skill_table_viewport.min_y &&
+                g_cursor_y < skill_table_viewport.min_y + skill_table_viewport.height)
+            {
+                g_skill_table_viewport_offset = max32(0,
+                    g_skill_table_viewport_offset - (g_120ths_of_mouse_wheel_notches_turned *
+                        (int32_t)(g_text_lines_per_mouse_wheel_notch * g_table_row_height)) / 120);
+                g_skill_previous_table_viewport_offset = g_skill_table_viewport_offset;
+            }
             if (g_left_mouse_button_is_down &&
                 g_clicked_control_id == SKILL_TABLE_SCROLL_BAR_THUMB_ID)
             {
                 int32_t thumb_offset =
                     (max_thumb_offset * g_skill_previous_table_viewport_offset +
-                        max_viewport_offset / 2) / max_viewport_offset +
-                    g_cursor_y - g_previous_skill_table_scroll_bar_cursor_y;
+                        max_viewport_offset / 2) / max_viewport_offset + g_cursor_y -
+                    g_previous_skill_table_scroll_bar_cursor_y;
                 if (thumb_offset > 0)
                 {
                     if (thumb_offset > max_thumb_offset)
@@ -677,7 +693,7 @@ int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handl
                 thumb_min_y += (max_thumb_offset * g_skill_table_viewport_offset +
                     max_viewport_offset / 2) / max_viewport_offset;
                 if (g_left_mouse_button_is_down && g_left_mouse_button_changed_state &&
-                    g_cursor_x >= g_line_thickness && g_cursor_x < g_cursor_x + thumb_width &&
+                    g_cursor_x >= g_line_thickness && g_cursor_x < g_line_thickness + thumb_width &&
                     g_cursor_y >= thumb_min_y && g_cursor_y < thumb_min_y + thumb_height)
                 {
                     g_clicked_control_id = SKILL_TABLE_SCROLL_BAR_THUMB_ID;
@@ -949,6 +965,7 @@ int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handl
             client_rect.right - client_rect.left, client_rect.bottom - client_rect.top,
             g_pixels, &g_pixel_buffer_info, DIB_RGB_COLORS, SRCCOPY);
         g_left_mouse_button_changed_state = false;
+        g_120ths_of_mouse_wheel_notches_turned = 0;
         if (!g_left_mouse_button_is_down)
         {
             g_clicked_control_id = NULL_CONTROL_ID;

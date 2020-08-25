@@ -1,15 +1,17 @@
-#include <stdbool.h>
-#include <stdint.h>
-#include <windows.h>
-#include <windowsx.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include <stdbool.h>
+#include <stdint.h>
+
+uint8_t g_unallocated_dice[] = { 1, 3, 2 };
 
 #define ARRAY_COUNT(arr) (sizeof(arr) / sizeof(arr[0]))
 
 #define UNPAREN(...) __VA_ARGS__
 #define MAKE_ENUM(name, value) name,
 #define MAKE_VALUE(name, value) UNPAREN value,
+
+#include "rulebook_data.c"
 
 int32_t min32(int32_t a, int32_t b)
 {
@@ -52,7 +54,7 @@ void allocate_unaligned_stack_slot(Stack*output_stack, size_t slot_size)
     output_stack->cursor = (uint8_t*)output_stack->cursor + slot_size;
     while (output_stack->cursor > output_stack->cursor_max)
     {
-        VirtualAlloc(output_stack->cursor_max, g_page_size, MEM_COMMIT, PAGE_READWRITE);
+        COMMIT_PAGE(output_stack->cursor_max);
         output_stack->cursor_max = (uint8_t*)output_stack->cursor_max + g_page_size;
     }
 }
@@ -84,7 +86,6 @@ typedef union Color
     uint32_t value;
 } Color;
 
-BITMAPINFO g_pixel_buffer_info;
 Color*g_pixels = 0;
 Rect g_window_rect = { 0, 0 };
 
@@ -228,7 +229,7 @@ void draw_rasterization(Rect*clip_rect, Rasterization*rasterization, int32_t min
     {
         Color*bitmap_row_left_end_in_window_buffer =
             bitmap_top_left_in_window_buffer + bitmap_y * g_window_rect.width;
-        for (LONG bitmap_x = max32(0, clip_rect->min_x - min_x); bitmap_x < max_x_in_bitmap;
+        for (int32_t bitmap_x = max32(0, clip_rect->min_x - min_x); bitmap_x < max_x_in_bitmap;
             ++bitmap_x)
         {
             Color*pixel = bitmap_row_left_end_in_window_buffer + bitmap_x;
@@ -467,1213 +468,18 @@ void update_scroll_bar_offset(Rect*viewport, ScrollOffset*offset, uint32_t conte
         thumb_height, g_dark_gray);
 }
 
-typedef struct Skill
-{
-    char*name;
-    uint8_t mark_count;
-} Skill;
-
-Skill g_skills[] = { { "Academics" }, { "Brawling" }, { "Climbing" }, { "Craft" }, { "Deceit" },
-{ "Digging" }, { "Dodge" }, { "Endurance" }, { "Gossip" }, { "Inquiry" }, { "Jumping" },
-{ "Leadership" }, { "Mle Combat" }, { "Negotiation" }, { "Observation" }, { "Presence" },
-{ "Ranged Combat" }, { "Riding" }, { "Searching" }, { "Stealth" }, { "Supernatural" },
-{ "Swimming" }, { "Tactics" }, { "Throwing" }, { "Vehicles" }, { "Weather Sense" } };
-
-#define DIE_DENOMINATIONS(macro)\
-macro(DENOMINATION_D4, ("D4"))\
-macro(DENOMINATION_D6, ("D6"))\
-macro(DENOMINATION_D8, ("D8"))\
-macro(DENOMINATION_D10, ("D10"))\
-macro(DENOMINATION_D12, ("D12"))
-
-enum DieDenominationIndex
-{
-    DIE_DENOMINATIONS(MAKE_ENUM)
-};
-
-char*g_die_denominations[] = { DIE_DENOMINATIONS(MAKE_VALUE) };
 uint32_t g_skill_column_width;
 uint32_t g_die_column_width;
 size_t g_selected_skill_index = ARRAY_COUNT(g_skills);
 
 ScrollOffset g_skill_table_scroll_offset;
 
-uint8_t g_unallocated_dice[] = { 1, 3, 2 };
 size_t g_selected_die_denomination_index = ARRAY_COUNT(g_unallocated_dice);
 
-typedef struct Trait
-{
-    char*name;
-    uint8_t dice[ARRAY_COUNT(g_unallocated_dice)];
-} Trait;
-
-#define TRAITS(macro)\
-macro(TRAIT_BODY, ({ "Body" }))\
-macro(TRAIT_SPEED, ({ "Speed" }))\
-macro(TRAIT_MIND, ({ "Mind" }))\
-macro(TRAIT_WILL, ({ "Will" }))\
-macro(TRAIT_SPECIES, ({ "Species" }))\
-macro(TRAIT_CAREER, ({ "Career" }))
-
-enum TraitIndex
-{
-    TRAITS(MAKE_ENUM)
-};
-
-Trait g_traits[] = { TRAITS(MAKE_VALUE) };
 uint32_t g_trait_column_width;
 size_t g_selected_trait_index = ARRAY_COUNT(g_traits);
 
 uint8_t g_unallocated_marks = 13;
-
-#define DESCRIPTOR_INFLUENCE 0x1
-
-enum RequirementIndex
-{
-    REQUIREMENT_TEXT_JUSTIFICATION,
-    REQUIREMENT_GIFT,
-    REQUIREMENT_NO_GIFT_WITH_DESCRIPTOR,
-    REQUIREMENT_TRAIT,
-    REQUIREMENT_CAREER_GIFTS,
-    REQUIREMENT_FAVORITE_USE,
-    REQUIREMENT_HOST_PERMISSION
-};
-
-typedef struct Requirement
-{
-    union
-    {
-        char*justification;
-        uint16_t descriptor_flags;
-        uint8_t gift_index;
-        struct
-        {
-            uint8_t trait_index;
-            uint8_t minimum_denomination;
-        };
-    };
-    uint8_t requirement_type;
-} Requirement;
-
-typedef struct Gift
-{
-    char*name;
-    Requirement*requirements;
-    uint16_t descriptor_flags;
-    uint8_t requirement_count;
-} Gift;
-
-#define GIFTS(macro)\
-macro(GIFT_ACROBAT, ({ "Acrobat" }))\
-macro(GIFT_BRAWLING_FIGHTER, ({ "Brawling Fighter" }))\
-macro(GIFT_CHARGING_STRIKE, ({ "Charging Strike" }))\
-macro(GIFT_CONTORTIONIST, ({ "Contortionist" }))\
-macro(GIFT_COWARD, ({ "Coward" }))\
-macro(GIFT_FAST_CLIMBER, ({ "Fast Climber" }))\
-macro(GIFT_FAST_JUMPER, ({ "Fast Jumper" }))\
-macro(GIFT_FAST_SWIMMER, ({ "Fast Swimmer" }))\
-macro(GIFT_FRENZY, ({ "Frenzy" }))\
-macro(GIFT_GIANT,\
-({\
-    "Giant",\
-    (Requirement[])\
-    {\
-        {\
-            .trait_index = TRAIT_BODY,\
-            .minimum_denomination = DENOMINATION_D12,\
-            .requirement_type = REQUIREMENT_TRAIT\
-        }\
-    },\
-    DESCRIPTOR_INFLUENCE, 1\
-}))\
-macro(GIFT_HIKING, ({ "Hiking" }))\
-macro(GIFT_KEEN_EARS, ({ "Keen Ears" }))\
-macro(GIFT_KEEN_EYES, ({ "Keen Eyes" }))\
-macro(GIFT_KEEN_NOSE, ({ "Keen Nose" }))\
-macro(GIFT_LEGERDEMAIN, ({ "Legerdemain" }))\
-macro(GIFT_MELEE_FINESSE, ({ "Melee Finesse" }))\
-macro(GIFT_MOUNTED_FIGHTER, ({ "Mounted Fighter" }))\
-macro(GIFT_NIGHT_VISION, ({ "Night Vision" }))\
-macro(GIFT_PACIFIST, ({ "Pacifist" }))\
-macro(GIFT_PARKOUR,\
-({\
-    "Parkour",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_FAST_CLIMBER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SPRINGING_STRIKE, ({ "Springing Strike" }))\
-macro(GIFT_SURE_FOOTED, ({ "Sure-Footed" }))\
-macro(GIFT_ANIMAL_HANDLING, ({ "Animal Handling" }))\
-macro(GIFT_ARTIST, ({ "Artist" }))\
-macro(GIFT_CLEAR_HEADED, ({ "Clear-Headed" }))\
-macro(GIFT_CRAFT_SPECIALTY, ({ "Craft Specialty" }))\
-macro(GIFT_DEAD_RECKONING, ({ "Dead Reckoning" }))\
-macro(GIFT_EXTRA_FAVORITE, ({ "Extra Favorite" }))\
-macro(GIFT_FIRST_AID, ({ "First Aid" }))\
-macro(GIFT_GAMBLING, ({ "Gambling" }))\
-macro(GIFT_GEOGRAPHY, ({ "Geography" }))\
-macro(GIFT_HERALDRY, ({ "Heraldry" }))\
-macro(GIFT_HISTORY, ({ "History" }))\
-macro(GIFT_JUNK_EXPERT, ({ "Junk Expert" }))\
-macro(GIFT_LANGUAGE, ({ "Language" }))\
-macro(GIFT_MEDICINE, ({ "Medicine" }))\
-macro(GIFT_MELEE_FERVOR, ({ "Melee Fervor" }))\
-macro(GIFT_MELEE_GUILE, ({ "Melee Guile" }))\
-macro(GIFT_MYSTIC, ({ "Mystic" }))\
-macro(GIFT_OVERCONFIDENCE, ({ "Overconfidence" }))\
-macro(GIFT_PACK_TACTICS, ({ "Pack Tactics" }))\
-macro(GIFT_PIETY, ({ "Piety" }))\
-macro(GIFT_SAILING, ({ "Sailing" }))\
-macro(GIFT_SPELUNKING, ({ "Spelunking" }))\
-macro(GIFT_TEAMSTER, ({ "Teamster" }))\
-macro(GIFT_TRACKING, ({ "Tracking" }))\
-macro(GIFT_UNSHAKEABLE_FIGHTER, ({ "Unshakeable Fighter" }))\
-macro(GIFT_VENGEFUL_FIGHTER, ({ "Vengeful Fighter" }))\
-macro(GIFT_BRIBERY, ({ "Bribery" }))\
-macro(GIFT_CAROUSING, ({ "Carousing" }))\
-macro(GIFT_COSMOPOLITAN, ({ "Cosmopolitan" }))\
-macro(GIFT_DIPLOMACY, ({ "Diplomacy" }))\
-macro(GIFT_DISGUISE, ({ "Disguise" }))\
-macro(GIFT_ETIQUETTE, ({ "Etiquette" }))\
-macro(GIFT_FAST_TALK, ({ "Fast-Talk" }))\
-macro(GIFT_HAGGLING, ({ "Haggling" }))\
-macro(GIFT_HONOR, ({ "Honor" }))\
-macro(GIFT_INSIDER, ({ "Insider" }))\
-macro(GIFT_LAW, ({ "Law" }))\
-macro(GIFT_LEGAL_AUTHORITY,\
-({\
-    "Legal Authority",\
-    (Requirement[])\
-    {\
-        {\
-            .justification = "Authorization from a recognized legal authority.",\
-            .requirement_type = REQUIREMENT_TEXT_JUSTIFICATION\
-        }\
-    },\
-    DESCRIPTOR_INFLUENCE, 1\
-}))\
-macro(GIFT_LOCAL_KNOWLEDGE, ({ "Local Knowledge" }))\
-macro(GIFT_LOW_PROFILE, ({ "Low Profile" }))\
-macro(GIFT_NOBILITY,\
-({\
-    "Nobility",\
-    (Requirement[])\
-    {\
-        {\
-            .justification = "A noble bloodline or parent of nobility, traceable to a Great House or Minor House.",\
-            .requirement_type = REQUIREMENT_TEXT_JUSTIFICATION\
-        }\
-    },\
-    DESCRIPTOR_INFLUENCE, 1\
-}))\
-macro(GIFT_ORATORY, ({ "Oratory" }))\
-macro(GIFT_ORDAINMENT,\
-({\
-    "Ordainment",\
-    (Requirement[])\
-    {\
-        {\
-            .justification = "An endorsement from a religious organization.",\
-            .requirement_type = REQUIREMENT_TEXT_JUSTIFICATION\
-        }\
-    },\
-    DESCRIPTOR_INFLUENCE, 1\
-}))\
-macro(GIFT_PERFORMANCE, ({ "Performance" }))\
-macro(GIFT_SEDUCTION, ({ "Seduction" }))\
-macro(GIFT_SHADOWING, ({ "Shadowing" }))\
-macro(GIFT_SURVIVAL, ({ "Survival" }))\
-macro(GIFT_TEAM_PLAYER, ({ "Team Player" }))\
-macro(GIFT_WEALTH,\
-({\
-    "Wealth",\
-    (Requirement[])\
-    {\
-        {\
-            .justification = "An appropriate background and career.",\
-            .requirement_type = REQUIREMENT_TEXT_JUSTIFICATION\
-        }\
-    },\
-    DESCRIPTOR_INFLUENCE, 1\
-}))\
-macro(GIFT_ARCHERS_TRAPPINGS, ({ "Archer's Trappings" }))\
-macro(GIFT_CLERICS_TRAPPINGS, ({ "Cleric's Trappings" }))\
-macro(GIFT_COGNOSCENTES_TRAPPINGS, ({ "Cognoscente's Trappings" }))\
-macro(GIFT_DILETTANTES_TRAPPINGS, ({ "Dilettante's Trappings" }))\
-macro(GIFT_ELEMENTALISTS_TRAPPINGS, ({ "Elementalist's Trappings" }))\
-macro(GIFT_FUSILEERS_TRAPPINGS, ({ "Fusileer's Trappings" }))\
-macro(GIFT_KNIGHTS_TRAPPINGS, ({ "Knight's Trappings" }))\
-macro(GIFT_MUSKETEERS_TRAPPINGS, ({ "Musketeer's Trappings" }))\
-macro(GIFT_RIDERS_TRAPPINGS, ({ "Rider's Trappings" }))\
-macro(GIFT_SCHOLARS_TRAPPINGS, ({ "Scholar's Trappings" }))\
-macro(GIFT_SIGNATURE_ITEM, ({ "Signature Item" }))\
-macro(GIFT_SPYS_TRAPPINGS, ({ "Spy's Trappings" }))\
-macro(GIFT_THAUMATURGES_TRAPPINGS, ({ "Thaumaturge's Trappings" }))\
-macro(GIFT_COMBAT_EDGE, ({ "Combat Edge" }))\
-macro(GIFT_COMBAT_SAVE, ({ "Combat Save" }))\
-macro(GIFT_DIEHARD,\
-({\
-    "Diehard",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_TOUGHNESS,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_DISARMING_SAVE,\
-({\
-    "Disarming Save",\
-    (Requirement[])\
-    {\
-        {\
-            .trait_index = TRAIT_BODY,\
-            .minimum_denomination = DENOMINATION_D8,\
-            .requirement_type = REQUIREMENT_TRAIT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_DRAMATIC_DISHEVELING,\
-({\
-    "Dramatic Disheveling",\
-    (Requirement[])\
-    {\
-        {\
-            .trait_index = TRAIT_WILL,\
-            .minimum_denomination = DENOMINATION_D8,\
-            .requirement_type = REQUIREMENT_TRAIT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_MAGIC_SAVE,\
-({\
-    "Magic Save",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_MYSTIC,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_REPLAY_FOR_DESTINY,\
-({\
-    "Replay for Destiny",\
-    (Requirement[])\
-    {\
-        {\
-            .trait_index = TRAIT_BODY,\
-            .minimum_denomination = DENOMINATION_D8,\
-        },\
-        {\
-            .trait_index = TRAIT_SPEED,\
-            .minimum_denomination = DENOMINATION_D8,\
-        },\
-        {\
-            .trait_index = TRAIT_MIND,\
-            .minimum_denomination = DENOMINATION_D8,\
-        },\
-        {\
-            .trait_index = TRAIT_WILL,\
-            .minimum_denomination = DENOMINATION_D8,\
-        }\
-    },\
-    0, 4\
-}))\
-macro(GIFT_RETREATING_SAVE,\
-({\
-    "Retreating Save",\
-    (Requirement[])\
-    {\
-        {\
-            .trait_index = TRAIT_SPEED,\
-            .minimum_denomination = DENOMINATION_D8,\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SHIELD_SAVE,\
-({\
-    "Shield Save",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_RESOLVE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        },\
-        {\
-            .gift_index = GIFT_VETERAN,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 2\
-}))\
-macro(GIFT_TOUGHNESS, ({ "Toughness" }))\
-macro(GIFT_EXTRA_CAREER,\
-({\
-    "Extra Career",\
-    (Requirement[])\
-    {\
-        {\
-            .requirement_type = REQUIREMENT_CAREER_GIFTS\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_FAVOR_BONUS,\
-({\
-    "Favor Bonus",\
-    (Requirement[])\
-    {\
-        {\
-            .requirement_type = REQUIREMENT_FAVORITE_USE\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_INCREASED_TRAIT, ({ "Increased Trait" }))\
-macro(GIFT_KNACK, ({ "Knack" }))\
-macro(GIFT_LUCK, ({ "Luck" }))\
-macro(GIFT_PERSONALITY, ({ "Personality" }))\
-macro(GIFT_DEEP_DIVING, ({ "Deep Diving" }))\
-macro(GIFT_ECHOLOCATION, ({ "Echolocation" }))\
-macro(GIFT_FLIGHT, ({ "Flight" }))\
-macro(GIFT_HOWLING, ({ "Howling" }))\
-macro(GIFT_NATURAL_ARMOR, ({ "Natural Armor" }))\
-macro(GIFT_PREHENSILE_FEET, ({ "Prehensile Feet" }))\
-macro(GIFT_PREHENSILE_TAIL, ({ "Prehensile Tail" }))\
-macro(GIFT_QUILLS, ({ "Quills" }))\
-macro(GIFT_SPRAY, ({ "Spray" }))\
-macro(GIFT_VENEMOUS_BITE, ({ "Venemous Bite" }))\
-macro(GIFT_ALLY, ({ "Ally" }))\
-macro(GIFT_GANG_OF_IRREGULARS,\
-({\
-    "Gang of Irregulars",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_ALLY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_IMPROVED_ALLY,\
-({\
-    "Improved Ally",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_ALLY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_AMBIDEXTERITY, ({ "Ambidexterity" }))\
-macro(GIFT_AKIMBO_FIGHTER,\
-({\
-    "Akimbo Fighter",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_AMBIDEXTERITY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_TANDEM_REPLAY,\
-({\
-    "Tandem Replay",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_AMBIDEXTERITY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_TANDEM_STRIKE,\
-({\
-    "Tandem Strike",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_AMBIDEXTERITY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_COUNTER_TACTICS, ({ "Counter-Tactics" }))\
-macro(GIFT_ALL_OUT_ATTACK,\
-({\
-    "All-Out Attack",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_COUNTER_TACTICS,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_GUARD_BREAKER,\
-({\
-    "Guard Breaker",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_COUNTER_TACTICS,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_KNOCKDOWN_STRIKE,\
-({\
-    "Knockdown Strike",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_COUNTER_TACTICS,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_MOB_FIGHTER,\
-({\
-    "Mob Fighter",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_COUNTER_TACTICS,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_THREATENING_FIGHTER,\
-({\
-    "Threatening Fighter",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_COUNTER_TACTICS,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_DANGER_SENSE, ({ "Danger Sense" }))\
-macro(GIFT_BODYGUARD,\
-({\
-    "Bodyguard",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_DANGER_SENSE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_BLIND_FIGHTING,\
-({\
-    "Blind-Fighting",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_DANGER_SENSE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_PRUDENCE,\
-({\
-    "Prudence",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_DANGER_SENSE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SIXTH_SENSE,\
-({\
-    "Sixth Sense",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_DANGER_SENSE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_STITCH_IN_TIME,\
-({\
-    "Stitch in Time",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_DANGER_SENSE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_FAST_MOVER, ({ "Fast Mover" }))\
-macro(GIFT_ARTFUL_DODGER,\
-({\
-    "Artful Dodger",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_FAST_MOVER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_MAD_SPRINT,\
-({\
-    "Mad Sprint",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_FAST_MOVER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_RAPID_DASH,\
-({\
-    "Rapid Dash",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_FAST_MOVER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_RAPID_SPRINT,\
-({\
-    "Rapid Sprint",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_FAST_MOVER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_FENCING, ({ "Fencing" }))\
-macro(GIFT_DISARMING_STRIKE,\
-({\
-    "Disarming Strike",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_FENCING,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_FENCING_REPLAY,\
-({\
-    "Fencing Replay",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_FENCING,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_RAPIER_LUNGE,\
-({\
-    "Rapier Lunge",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_FENCING,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_LITERACY, ({ "Literacy" }))\
-macro(GIFT_ADMINISTRATION,\
-({\
-    "Administration",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_ASTROLOGY,\
-({\
-    "Astrology",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_CARTOGRAPHY,\
-({\
-    "Cartography",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_DOCTOR,\
-({\
-    "Doctor",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_MATHEMATICS,\
-({\
-    "Mathematics",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_RESEARCH,\
-({\
-    "Research",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_TRADEWINDS_NAVIGATION,\
-({\
-    "Tradewinds Navigation",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_QUICK_DRAW, ({ "Quick Draw" }))\
-macro(GIFT_QUICK_SHEATHE,\
-({\
-    "Quick Sheathe",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_QUICK_DRAW,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SECOND_THROW,\
-({\
-    "Second Throw",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_QUICK_DRAW,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SUDDEN_DRAW,\
-({\
-    "Sudden Draw",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_QUICK_DRAW,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_RESOLVE, ({ "Resolve" }))\
-macro(GIFT_ARMORED_FIGHTER,\
-({\
-    "Armored Fighter",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_RESOLVE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_GUARD_SOAK,\
-({\
-    "Guard Soak",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_RESOLVE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_RELENTLESSNESS,\
-({\
-    "Relentlessness",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_RESOLVE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SCARY_FIGHTER,\
-({\
-    "Scary Fighter",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_RESOLVE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SHIELD_SOAK,\
-({\
-    "Shield Soak",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_RESOLVE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SHARPSHOOTER, ({ "Sharpshooter" }))\
-macro(GIFT_AIMING_ON_THE_DRAW,\
-({\
-    "Aiming on the Draw",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_SHARPSHOOTER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_COUNTER_SHOT,\
-({\
-    "Counter Shot",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_SHARPSHOOTER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_INSTINCTIVE_SHOT,\
-({\
-    "Instinctive Shot",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_SHARPSHOOTER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SNIPERS_SHOT,\
-({\
-    "Sniper's Shot",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_SHARPSHOOTER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_STREETWISE, ({ "Streetwise" }))\
-macro(GIFT_FORGERY,\
-({\
-    "Forgery",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_STREETWISE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SABOTAGE,\
-({\
-    "Sabotage",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_STREETWISE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SNEAKY_FIGHTER,\
-({\
-    "Sneaky Fighter",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_STREETWISE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SKULKING,\
-({\
-    "Skulking",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_STREETWISE,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_STRENGTH, ({ "Strength" }))\
-macro(GIFT_IMPROVED_STRENGTH,\
-({\
-    "Improved Strength",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_STRENGTH,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_INDOMITABLE_FIGHTER,\
-({\
-    "Indomitable Fighter",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_STRENGTH,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_LINE_BREAKER,\
-({\
-    "Line Breaker",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_STRENGTH,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_MIGHTY_GRIP,\
-({\
-    "Mighty Grip",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_STRENGTH,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_MIGHTY_STRIKE,\
-({\
-    "Mighty Strike",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_STRENGTH,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_TRUE_LEADER, ({ "True Leader" }))\
-macro(GIFT_COMMANDING_LEADER,\
-({\
-    "Commanding Leader",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_TRUE_LEADER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_MILITIA_LEADER,\
-({\
-    "Militia Leader",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_TRUE_LEADER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_TROOP_LEADER,\
-({\
-    "Troop Leader",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_TRUE_LEADER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_WATCHFUL_LEADER,\
-({\
-    "Watchful Leader",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_TRUE_LEADER,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_VETERAN, ({ "Veteran" }))\
-macro(GIFT_BRAVERY,\
-({\
-    "Bravery",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_VETERAN,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_FOCUSED_FIGHTER,\
-({\
-    "Focused Fighter",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_VETERAN,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_KNOCKOUT_STRIKE,\
-({\
-    "Knockout Strike",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_VETERAN,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_RAPID_AIM,\
-({\
-    "Rapid Aim",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_VETERAN,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_RAPID_GUARD,\
-({\
-    "Rapid Guard",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_VETERAN,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_SHIELD_FIGHTER,\
-({\
-    "Shield Fighter",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_VETERAN,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 1\
-}))\
-macro(GIFT_ANONYMOUS,\
-({\
-    "Anonymous",\
-    (Requirement[])\
-    {\
-        {\
-            .descriptor_flags = DESCRIPTOR_INFLUENCE,\
-            .requirement_type = REQUIREMENT_NO_GIFT_WITH_DESCRIPTOR\
-        },\
-        {\
-            .requirement_type = REQUIREMENT_HOST_PERMISSION\
-        }\
-    },\
-    0, 2\
-}))\
-macro(GIFT_ELEMENTAL_APPRENTICE,\
-({\
-    "Elemental Apprentice",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        },\
-        {\
-            .gift_index = GIFT_ELEMENTALISTS_TRAPPINGS,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 2\
-}))\
-macro(GIFT_GREEN_AND_PURPLE_MAGIC_APPRENTICE,\
-({\
-    "Green & Purple Magic Apprentice",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY, \
-            .requirement_type = REQUIREMENT_GIFT\
-        },\
-        {\
-            .gift_index = GIFT_COGNOSCENTES_TRAPPINGS, \
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 2\
-}))\
-macro(GIFT_THAUMATURGY_APPRENTICE,\
-({\
-    "Thaumaturgy Apprentice",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        },\
-        {\
-            .gift_index = GIFT_THAUMATURGES_TRAPPINGS,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 2\
-}))\
-macro(GIFT_WHITE_MAGIC_APPRENTICE, ({ "White Magic Apprentice",\
-    (Requirement[])\
-    {\
-        {\
-            .gift_index = GIFT_LITERACY,\
-            .requirement_type = REQUIREMENT_GIFT\
-        },\
-        {\
-            .gift_index = GIFT_CLERICS_TRAPPINGS,\
-            .requirement_type = REQUIREMENT_GIFT\
-        }\
-    },\
-    0, 2\
-}))
-
-enum GiftIndex
-{
-    GIFTS(MAKE_ENUM)
-};
-
-Gift g_gifts[] = { GIFTS(MAKE_VALUE) };
 
 #define TABS(macro)\
 macro(TAB_ALLOCATE_DICE, ("Allocate Trait Dice"))\
@@ -1688,19 +494,9 @@ char*g_tab_names[] = { TABS(MAKE_VALUE) };
 uint32_t g_tab_width;
 size_t g_selected_tab_index = 0;
 
-void scale_window_contents(HWND window_handle, WORD dpi)
+void scale_window_contents(void*font_data, size_t font_data_size, uint16_t dpi)
 {
-    HFONT win_font = CreateFont(0, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET,
-        OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, 0, "Ariel");
-    HDC device_context = GetDC(window_handle);
-    SelectFont(device_context, win_font);
-    DWORD font_file_size = GetFontData(device_context, 0, 0, 0, 0);
-    void*font_data = g_stack.cursor;
-    allocate_unaligned_stack_slot(&g_stack, font_file_size);
-    GetFontData(device_context, 0, 0, font_data, font_file_size);
-    DeleteObject(win_font);
-    ReleaseDC(window_handle, device_context);
-    FT_New_Memory_Face(g_freetype_library, font_data, font_file_size, 0, &g_face);
+    FT_New_Memory_Face(g_freetype_library, font_data, font_data_size, 0, &g_face);
     FT_Set_Char_Size(g_face, 0, g_message_font_height, 0, dpi);
     for (FT_ULong codepoint = FIRST_RASTERIZED_GLYPH; codepoint <= LAST_RASTERIZED_GLYPH;
         ++codepoint)
@@ -1857,409 +653,308 @@ void format_window()
     }
 }
 
-LRESULT CALLBACK create_character_proc(HWND window_handle, UINT message, WPARAM w_param,
-    LPARAM l_param)
-{
-    switch (message)
-    {
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
-    case WM_DPICHANGED:
-        g_stack.cursor = g_stack.start;
-        FT_Done_Face(g_face);
-        scale_window_contents(window_handle, HIWORD(w_param));
-        format_window();
-        RECT*client_rect = (RECT*)l_param;
-        SetWindowPos(window_handle, 0, client_rect->left, client_rect->top,
-            client_rect->right - client_rect->left, client_rect->bottom - client_rect->top,
-            SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOZORDER);
-        return 0;
-    case WM_LBUTTONDOWN:
-        SetCapture(window_handle);
-        g_left_mouse_button_is_down = true;
-        g_left_mouse_button_changed_state = true;
-        return 0;
-    case WM_LBUTTONUP:
-        ReleaseCapture();
-        g_left_mouse_button_is_down = false;
-        g_left_mouse_button_changed_state = true;
-        return 0;
-    case WM_MOUSEMOVE:
-        g_cursor_x = GET_X_LPARAM(l_param);
-        g_cursor_y = GET_Y_LPARAM(l_param);
-        return 0;
-    case WM_MOUSEWHEEL:
-        g_120ths_of_mouse_wheel_notches_turned = GET_WHEEL_DELTA_WPARAM(w_param);
-        return 0;
-    case WM_SIZE:
-    {
-        RECT client_rect;
-        GetClientRect(window_handle, &client_rect);
-        g_window_rect.width = client_rect.right - client_rect.left;
-        g_window_rect.height = client_rect.bottom - client_rect.top;
-        g_pixel_buffer_info.bmiHeader.biWidth = g_window_rect.width;
-        g_pixel_buffer_info.bmiHeader.biHeight = -(int32_t)g_window_rect.height;
-        VirtualFree(g_pixels, 0, MEM_RELEASE);
-        g_pixels = VirtualAlloc(0, sizeof(Color) * g_window_rect.width * g_window_rect.height,
-            MEM_COMMIT, PAGE_READWRITE);
-        format_window();
-        return 0;
-    }
-    }
-    return DefWindowProc(window_handle, message, w_param, l_param);
+#define INIT(copy_font_data_param, dpi)\
+{\
+    SET_MESSAGE_FONT_SIZE(dpi);\
+    SET_PAGE_SIZE();\
+    g_stack.start = RESERVE_MEMORY(UINT32_MAX);\
+    g_stack.end = (uint8_t*)g_stack.start + UINT32_MAX;\
+    g_stack.cursor = g_stack.start;\
+    g_stack.cursor_max = g_stack.start;\
+    g_skill_table_dice_header.column_count = ARRAY_COUNT(g_die_denominations);\
+    g_skill_table_dice_header.row_count = 1;\
+    g_skill_table_dice_header.column_min_x_values = g_skill_table_column_min_x_values + 2;\
+    g_skill_table.column_count = ARRAY_COUNT(g_skill_table_column_min_x_values) - 1;\
+    g_skill_table.row_count = ARRAY_COUNT(g_skills);\
+    g_skill_table.column_min_x_values = g_skill_table_column_min_x_values;\
+    FT_Init_FreeType(&g_freetype_library);\
+    scale_window_contents(g_stack.start, COPY_FONT_DATA_TO_STACK_CURSOR(copy_font_data_param, dpi),\
+        dpi);\
+    format_allocate_trait_dice_tab();\
+    SET_INITIAL_CURSOR_POSITION();\
 }
 
-HWND init(HINSTANCE instance_handle)
+void handle_message(void)
 {
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
-    SYSTEM_INFO system_info;
-    GetSystemInfo(&system_info);
-    if (system_info.dwAllocationGranularity > system_info.dwPageSize)
+    for (size_t i = 0; i < g_window_rect.width * g_window_rect.height; ++i)
     {
-        g_page_size = system_info.dwAllocationGranularity;
+        g_pixels[i].value = g_dark_gray.value;
+    }
+    int32_t tab_cell_min_x = g_window_rect.width - g_tab_width;
+    uint32_t tab_cell_width = g_tab_width - g_line_thickness;
+    int32_t tab_min_x = tab_cell_min_x - g_line_thickness;
+    int32_t tab_min_y = -(int32_t)g_line_thickness;
+    if (select_table_row(&g_window_rect, &g_selected_tab_index, ARRAY_COUNT(g_tab_names), tab_min_x,
+        tab_min_y, g_tab_width, TABS_ID))
+    {
+        format_window();
+    }
+    for (size_t i = 0; i < ARRAY_COUNT(g_tab_names); ++i)
+    {
+        tab_min_y += g_table_row_height;
+        draw_horizontally_centered_string(g_tab_names[i], &g_window_rect, tab_cell_min_x,
+            tab_min_y - g_text_padding, tab_cell_width);
+        draw_filled_rectangle(&g_window_rect, tab_cell_min_x, tab_min_y, tab_cell_width,
+            g_line_thickness, g_black);
+    }
+    draw_filled_rectangle(&g_window_rect, tab_min_x, 0, g_line_thickness, g_window_rect.height,
+        g_black);
+    uint32_t cell_height = g_table_row_height - g_line_thickness;
+    draw_filled_rectangle(&g_window_rect, tab_min_x, g_selected_tab_index * g_table_row_height,
+        g_line_thickness, cell_height, g_dark_gray);
+    draw_filled_rectangle(&g_window_rect, g_window_rect.width - g_line_thickness, 0,
+        g_line_thickness, ARRAY_COUNT(g_tab_names) * g_table_row_height, g_black);
+    if (g_skill_table_scroll_is_active)
+    {
+        update_scroll_bar_offset(&g_skill_table_viewport, &g_skill_table_scroll_offset,
+            g_table_row_height * ARRAY_COUNT(g_skills) - g_line_thickness,
+            SKILL_TABLE_SCROLL_BAR_THUMB_ID);
+    }
+    int32_t skill_table_frame_min_y = g_skill_table_dice_header.min_y + g_table_row_height;
+    g_skill_table.min_y =
+        skill_table_frame_min_y - g_skill_table_scroll_offset.current_content_offset;
+    uint32_t skill_table_width = get_grid_width(&g_skill_table);
+    Color allocate_button_border_color = g_light_gray;
+    Color deallocate_button_border_color = g_light_gray;
+    uint32_t unallocated_dice_table_height = 2 * g_table_row_height;
+    if (g_selected_tab_index == 0)
+    {
+        int32_t unallocated_dice_table_cell_min_x =
+            g_layout.unallocated_dice_table.column_min_x_values[0] + g_line_thickness;
+        if (g_cursor_x >= unallocated_dice_table_cell_min_x)
+        {
+            size_t die_index =
+                (g_cursor_x - unallocated_dice_table_cell_min_x) / g_die_column_width;
+            if (die_index < g_layout.unallocated_dice_table.column_count)
+            {
+                if (do_button_action(&g_window_rect, UNALLOCATED_DICE_TABLE_ID | die_index,
+                    g_layout.unallocated_dice_table.column_min_x_values[die_index],
+                    skill_table_frame_min_y, g_die_column_width, unallocated_dice_table_height))
+                {
+                    g_selected_die_denomination_index = die_index;
+                }
+            }
+            if ((g_clicked_control_id & PARENT_CONTROL_ID_MASK) == UNALLOCATED_DICE_TABLE_ID)
+            {
+                do_button_action(&g_window_rect, g_clicked_control_id,
+                    g_layout.unallocated_dice_table.column_min_x_values[
+                        g_clicked_control_id & CHILD_CONTROL_ID_MASK],
+                    skill_table_frame_min_y, g_die_column_width, unallocated_dice_table_height);
+            }
+        }
+        uint32_t die_cell_width = g_die_column_width - g_line_thickness;
+        if (g_selected_die_denomination_index < g_layout.unallocated_dice_table.column_count)
+        {
+            draw_filled_rectangle(&g_window_rect, g_layout.unallocated_dice_table.
+                column_min_x_values[g_selected_die_denomination_index] + g_line_thickness,
+                g_skill_table_viewport.min_y + g_table_row_height, die_cell_width, cell_height,
+                g_white);
+        }
+        select_table_row(&g_window_rect, &g_selected_trait_index, ARRAY_COUNT(g_traits),
+            g_layout.trait_table.column_min_x_values[0], g_layout.trait_table.min_y,
+            get_grid_width(&g_layout.trait_table), TRAIT_TABLE_ID);
+        if (g_selected_trait_index < ARRAY_COUNT(g_traits))
+        {
+            draw_filled_rectangle(&g_window_rect, g_layout.trait_table.column_min_x_values[1],
+                g_line_thickness + g_layout.trait_table.min_y +
+                    g_selected_trait_index * g_table_row_height,
+                g_layout.trait_table.column_min_x_values[g_layout.trait_table.column_count] -
+                    g_layout.trait_table.column_min_x_values[1],
+                cell_height, g_white);
+        }
+        if (g_selected_trait_index < ARRAY_COUNT(g_traits) && g_selected_die_denomination_index < 3)
+        {
+            uint8_t*selected_trait_dice =
+                g_traits[g_selected_trait_index].dice + g_selected_die_denomination_index;
+            if (g_unallocated_dice[g_selected_die_denomination_index])
+            {
+                if (do_button_action(&g_window_rect, ALLOCATE_BUTTON_ID,
+                    g_allocate_button_min_x, g_allocate_button_min_y, g_table_row_height,
+                    g_table_row_height))
+                {
+                    ++*selected_trait_dice;
+                    --g_unallocated_dice[g_selected_die_denomination_index];
+                }
+                allocate_button_border_color = g_black;
+            }
+            if (*selected_trait_dice)
+            {
+                if (do_button_action(&g_window_rect, DEALLOCATE_BUTTON_ID,
+                    g_deallocate_button_min_x, g_deallocate_button_min_y, g_table_row_height,
+                    g_table_row_height))
+                {
+                    --*selected_trait_dice;
+                    ++g_unallocated_dice[g_selected_die_denomination_index];
+                }
+                deallocate_button_border_color = g_black;
+            }
+        }
+        draw_grid(&g_layout.unallocated_dice_table);
+        int32_t cell_x = g_layout.unallocated_dice_table.column_min_x_values[0] + g_line_thickness;
+        int32_t text_y = skill_table_frame_min_y - g_text_padding;
+        uint32_t unallocated_dice_cells_width =
+            get_grid_width(&g_layout.unallocated_dice_table) - g_line_thickness;
+        draw_horizontally_centered_string("Unallocated Dice", &g_window_rect, cell_x, text_y,
+            unallocated_dice_cells_width);
+        text_y += g_table_row_height;
+        for (size_t i = 0; i < g_layout.unallocated_dice_table.column_count; ++i)
+        {
+            draw_horizontally_centered_string(g_die_denominations[i], &g_window_rect, cell_x,
+                text_y, die_cell_width);
+            draw_uint8(&g_window_rect, g_unallocated_dice[i], cell_x + g_text_padding,
+                text_y + g_table_row_height);
+            cell_x += g_die_column_width;
+        }
+        draw_grid(&g_layout.trait_table);
+        draw_grid(&(Grid) { 3, 1, g_layout.unallocated_dice_table.column_min_x_values,
+            g_layout.trait_table.min_y - g_table_row_height });
+        text_y = g_layout.trait_table.min_y - g_text_padding;
+        draw_horizontally_centered_string("Traits", &g_window_rect,
+            g_layout.trait_table.column_min_x_values[0], text_y,
+            g_trait_column_width + g_line_thickness);
+        draw_horizontally_centered_string("Dice", &g_window_rect,
+            g_layout.unallocated_dice_table.column_min_x_values[0] + g_line_thickness,
+            text_y - g_table_row_height, unallocated_dice_cells_width);
+        for (size_t i = 0; i < 3; ++i)
+        {
+            draw_horizontally_centered_string(g_die_denominations[i], &g_window_rect,
+                g_layout.unallocated_dice_table.column_min_x_values[i] + g_line_thickness, text_y,
+                die_cell_width);
+        }
+        for (size_t i = 0; i < g_layout.trait_table.row_count; ++i)
+        {
+            text_y += g_table_row_height;
+            Trait*trait = g_traits + i;
+            draw_string(trait->name, &g_window_rect,
+                g_layout.trait_table.column_min_x_values[0] + g_line_thickness + g_text_padding,
+                text_y);
+            for (size_t die_index = 0; die_index < ARRAY_COUNT(trait->dice); ++die_index)
+            {
+                draw_uint8(&g_window_rect, trait->dice[die_index],
+                    g_layout.unallocated_dice_table.column_min_x_values[die_index] +
+                        g_line_thickness + g_text_padding, text_y);
+            }
+        }
     }
     else
     {
-        g_page_size = system_info.dwPageSize;
+        select_table_row(&g_skill_table_viewport, &g_selected_skill_index, ARRAY_COUNT(g_skills),
+            g_skill_table.column_min_x_values[0], g_skill_table.min_y, skill_table_width,
+            SKILL_TABLE_ID);
+        if (g_selected_skill_index < ARRAY_COUNT(g_skills))
+        {
+            draw_filled_rectangle(&g_skill_table_viewport,
+                g_line_thickness + g_skill_table.column_min_x_values[1],
+                g_line_thickness + g_skill_table.min_y +
+                    g_selected_skill_index * g_table_row_height,
+                g_skill_table.column_min_x_values[2] -
+                    (g_skill_table.column_min_x_values[1] + g_line_thickness),
+                cell_height, g_white);
+        }
+        if (g_selected_skill_index < ARRAY_COUNT(g_skills))
+        {
+            Skill*selected_skill = g_skills + g_selected_skill_index;
+            if (g_unallocated_marks && selected_skill->mark_count < 3)
+            {
+                if (do_button_action(&g_window_rect, ALLOCATE_BUTTON_ID, g_allocate_button_min_x,
+                    g_allocate_button_min_y, g_table_row_height, g_table_row_height))
+                {
+                    ++selected_skill->mark_count;
+                    --g_unallocated_marks;
+                }
+                allocate_button_border_color = g_black;
+            }
+            if (selected_skill->mark_count)
+            {
+                if (do_button_action(&g_window_rect, DEALLOCATE_BUTTON_ID,
+                    g_deallocate_button_min_x, g_deallocate_button_min_y, g_table_row_height,
+                    g_table_row_height))
+                {
+                    --selected_skill->mark_count;
+                    ++g_unallocated_marks;
+                }
+                deallocate_button_border_color = g_black;
+            }
+        }
+        draw_rectangle_outline(g_layout.unallocated_marks_display_min_x,
+            g_layout.unallocated_marks_display_min_y, g_layout.unallocated_marks_display_width,
+            g_table_row_height, g_black);
+        int32_t text_x =
+            g_layout.unallocated_marks_display_min_x + g_line_thickness + g_text_padding;
+        int32_t text_y = g_deallocate_button_min_y - g_text_padding;
+        draw_string("Unallocated Marks", &g_window_rect, text_x, text_y);
+        draw_uint8(&g_window_rect, g_unallocated_marks, text_x, text_y + g_table_row_height);
     }
-    SystemParametersInfo(SPI_GETWHEELSCROLLLINES, 0, &g_text_lines_per_mouse_wheel_notch, 0);
-    g_stack.start = VirtualAlloc(0, UINT32_MAX, MEM_RESERVE, PAGE_READWRITE);
-    g_stack.end = (uint8_t*)g_stack.start + UINT32_MAX;
-    g_stack.cursor = g_stack.start;
-    g_stack.cursor_max = g_stack.start;
-    g_pixel_buffer_info.bmiHeader.biSize = sizeof(g_pixel_buffer_info.bmiHeader);
-    g_pixel_buffer_info.bmiHeader.biPlanes = 1;
-    g_pixel_buffer_info.bmiHeader.biBitCount = 8 * sizeof(Color);
-    g_pixel_buffer_info.bmiHeader.biCompression = BI_RGB;
-    WNDCLASSEX wc = { 0 };
-    wc.cbSize = sizeof(WNDCLASSEX);
-    wc.lpfnWndProc = create_character_proc;
-    wc.hInstance = instance_handle;
-    wc.hCursor = LoadCursor(0, IDC_ARROW);
-    wc.lpszClassName = "Create Character";
-    RegisterClassEx(&wc);
-    HWND window_handle = CreateWindow(wc.lpszClassName, "Create Character", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, instance_handle, 0);
-    NONCLIENTMETRICSW non_client_metrics;
-    non_client_metrics.cbSize = sizeof(NONCLIENTMETRICSW);
-    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, non_client_metrics.cbSize, &non_client_metrics,
-        0);
-    WORD dpi = GetDpiForWindow(window_handle);
-    g_message_font_height = ((-non_client_metrics.lfMessageFont.lfHeight * 72) << 6) / dpi;
-    FT_Init_FreeType(&g_freetype_library);
-    g_skill_table_dice_header.column_count = ARRAY_COUNT(g_die_denominations);
-    g_skill_table_dice_header.row_count = 1;
-    g_skill_table_dice_header.column_min_x_values = g_skill_table_column_min_x_values + 2;
-    g_skill_table.column_count = ARRAY_COUNT(g_skill_table_column_min_x_values) - 1;
-    g_skill_table.row_count = ARRAY_COUNT(g_skills);
-    g_skill_table.column_min_x_values = g_skill_table_column_min_x_values;
-    scale_window_contents(window_handle, dpi);
-    format_allocate_trait_dice_tab();
-    POINT cursor_position;
-    GetCursorPos(&cursor_position);
-    g_cursor_x = cursor_position.x;
-    g_cursor_y = cursor_position.y;
-    ShowWindow(window_handle, SW_MAXIMIZE);
-    return window_handle;
-}
-
-int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handle,
-    PWSTR command_line, int show)
-{
-    HWND window_handle = init(instance_handle);
-    HDC device_context = GetDC(window_handle);
-    MSG msg;
-    while (GetMessage(&msg, 0, 0, 0))
+    draw_grid(&g_skill_table_dice_header);
+    draw_horizontally_centered_string("Dice", &g_window_rect,
+        g_skill_table.column_min_x_values[2] + g_line_thickness, cell_height - g_text_padding,
+        get_grid_width(&g_skill_table_dice_header) - g_line_thickness);
+    uint32_t die_column_width_with_both_borders = g_die_column_width + g_line_thickness;
+    int32_t text_y = skill_table_frame_min_y - g_text_padding;
+    for (size_t i = 2; i < g_skill_table.column_count; ++i)
     {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-        for (size_t i = 0; i < g_window_rect.width * g_window_rect.height; ++i)
-        {
-            g_pixels[i].value = g_dark_gray.value;
-        }
-        int32_t tab_cell_min_x = g_window_rect.width - g_tab_width;
-        uint32_t tab_cell_width = g_tab_width - g_line_thickness;
-        int32_t tab_min_x = tab_cell_min_x - g_line_thickness;
-        int32_t tab_min_y = -(int32_t)g_line_thickness;
-        if (select_table_row(&g_window_rect, &g_selected_tab_index, ARRAY_COUNT(g_tab_names),
-            tab_min_x, tab_min_y, g_tab_width, TABS_ID))
-        {
-            format_window();
-        }
-        for (size_t i = 0; i < ARRAY_COUNT(g_tab_names); ++i)
-        {
-            tab_min_y += g_table_row_height;
-            draw_horizontally_centered_string(g_tab_names[i], &g_window_rect, tab_cell_min_x,
-                tab_min_y - g_text_padding, tab_cell_width);
-            draw_filled_rectangle(&g_window_rect, tab_cell_min_x, tab_min_y, tab_cell_width,
-                g_line_thickness, g_black);
-        }
-        draw_filled_rectangle(&g_window_rect, tab_min_x, 0, g_line_thickness, g_window_rect.height,
-            g_black);
-        uint32_t cell_height = g_table_row_height - g_line_thickness;
-        draw_filled_rectangle(&g_window_rect, tab_min_x, g_selected_tab_index * g_table_row_height,
-            g_line_thickness, cell_height, g_dark_gray);
-        draw_filled_rectangle(&g_window_rect, g_window_rect.width - g_line_thickness, 0,
-            g_line_thickness, ARRAY_COUNT(g_tab_names) * g_table_row_height, g_black);
-        if (g_skill_table_scroll_is_active)
-        {
-            update_scroll_bar_offset(&g_skill_table_viewport, &g_skill_table_scroll_offset,
-                g_table_row_height * ARRAY_COUNT(g_skills) - g_line_thickness,
-                SKILL_TABLE_SCROLL_BAR_THUMB_ID);
-        }
-        int32_t skill_table_frame_min_y = g_skill_table_dice_header.min_y + g_table_row_height;
-        g_skill_table.min_y =
-            skill_table_frame_min_y - g_skill_table_scroll_offset.current_content_offset;
-        uint32_t skill_table_width = get_grid_width(&g_skill_table);
-        Color allocate_button_border_color = g_light_gray;
-        Color deallocate_button_border_color = g_light_gray;
-        uint32_t unallocated_dice_table_height = 2 * g_table_row_height;
-        if (g_selected_tab_index == 0)
-        {
-            int32_t unallocated_dice_table_cell_min_x =
-                g_layout.unallocated_dice_table.column_min_x_values[0] + g_line_thickness;
-            if (g_cursor_x >= unallocated_dice_table_cell_min_x)
-            {
-                size_t die_index =
-                    (g_cursor_x - unallocated_dice_table_cell_min_x) / g_die_column_width;
-                if (die_index < g_layout.unallocated_dice_table.column_count)
-                {
-                    if (do_button_action(&g_window_rect, UNALLOCATED_DICE_TABLE_ID | die_index,
-                        g_layout.unallocated_dice_table.column_min_x_values[die_index],
-                        skill_table_frame_min_y, g_die_column_width, unallocated_dice_table_height))
-                    {
-                        g_selected_die_denomination_index = die_index;
-                    }
-                }
-                if ((g_clicked_control_id & PARENT_CONTROL_ID_MASK) == UNALLOCATED_DICE_TABLE_ID)
-                {
-                    do_button_action(&g_window_rect, g_clicked_control_id,
-                        g_layout.unallocated_dice_table.column_min_x_values[
-                            g_clicked_control_id & CHILD_CONTROL_ID_MASK],
-                        skill_table_frame_min_y, g_die_column_width, unallocated_dice_table_height);
-                }
-            }
-            uint32_t die_cell_width = g_die_column_width - g_line_thickness;
-            if (g_selected_die_denomination_index < g_layout.unallocated_dice_table.column_count)
-            {
-                draw_filled_rectangle(&g_window_rect, g_layout.unallocated_dice_table.
-                    column_min_x_values[g_selected_die_denomination_index] + g_line_thickness,
-                    g_skill_table_viewport.min_y + g_table_row_height, die_cell_width, cell_height,
-                    g_white);
-            }
-            select_table_row(&g_window_rect, &g_selected_trait_index, ARRAY_COUNT(g_traits),
-                g_layout.trait_table.column_min_x_values[0], g_layout.trait_table.min_y,
-                get_grid_width(&g_layout.trait_table), TRAIT_TABLE_ID);
-            if (g_selected_trait_index < ARRAY_COUNT(g_traits))
-            {
-                draw_filled_rectangle(&g_window_rect, g_layout.trait_table.column_min_x_values[1],
-                    g_line_thickness + g_layout.trait_table.min_y +
-                        g_selected_trait_index * g_table_row_height,
-                    g_layout.trait_table.column_min_x_values[g_layout.trait_table.column_count] -
-                    g_layout.trait_table.column_min_x_values[1], cell_height, g_white);
-            }
-            if (g_selected_trait_index < ARRAY_COUNT(g_traits) &&
-                g_selected_die_denomination_index < 3)
-            {
-                uint8_t*selected_trait_dice =
-                    g_traits[g_selected_trait_index].dice + g_selected_die_denomination_index;
-                if (g_unallocated_dice[g_selected_die_denomination_index])
-                {
-                    if (do_button_action(&g_window_rect, ALLOCATE_BUTTON_ID,
-                        g_allocate_button_min_x, g_allocate_button_min_y, g_table_row_height,
-                        g_table_row_height))
-                    {
-                        ++*selected_trait_dice;
-                        --g_unallocated_dice[g_selected_die_denomination_index];
-                    }
-                    allocate_button_border_color = g_black;
-                }
-                if (*selected_trait_dice)
-                {
-                    if (do_button_action(&g_window_rect, DEALLOCATE_BUTTON_ID,
-                        g_deallocate_button_min_x, g_deallocate_button_min_y, g_table_row_height,
-                        g_table_row_height))
-                    {
-                        --*selected_trait_dice;
-                        ++g_unallocated_dice[g_selected_die_denomination_index];
-                    }
-                    deallocate_button_border_color = g_black;
-                }
-            }
-            draw_grid(&g_layout.unallocated_dice_table);
-            int32_t cell_x =
-                g_layout.unallocated_dice_table.column_min_x_values[0] + g_line_thickness;
-            int32_t text_y = skill_table_frame_min_y - g_text_padding;
-            uint32_t unallocated_dice_cells_width =
-                get_grid_width(&g_layout.unallocated_dice_table) - g_line_thickness;
-            draw_horizontally_centered_string("Unallocated Dice", &g_window_rect, cell_x, text_y,
-                unallocated_dice_cells_width);
-            text_y += g_table_row_height;
-            for (size_t i = 0; i < g_layout.unallocated_dice_table.column_count; ++i)
-            {
-                draw_horizontally_centered_string(g_die_denominations[i], &g_window_rect, cell_x,
-                    text_y, die_cell_width);
-                draw_uint8(&g_window_rect, g_unallocated_dice[i], cell_x + g_text_padding,
-                    text_y + g_table_row_height);
-                cell_x += g_die_column_width;
-            }
-            draw_grid(&g_layout.trait_table);
-            draw_grid(&(Grid) { 3, 1, g_layout.unallocated_dice_table.column_min_x_values,
-                g_layout.trait_table.min_y - g_table_row_height });
-            text_y = g_layout.trait_table.min_y - g_text_padding;
-            draw_horizontally_centered_string("Traits", &g_window_rect,
-                g_layout.trait_table.column_min_x_values[0], text_y,
-                g_trait_column_width + g_line_thickness);
-            draw_horizontally_centered_string("Dice", &g_window_rect,
-                g_layout.unallocated_dice_table.column_min_x_values[0] + g_line_thickness,
-                text_y - g_table_row_height, unallocated_dice_cells_width);
-            for (size_t i = 0; i < 3; ++i)
-            {
-                draw_horizontally_centered_string(g_die_denominations[i], &g_window_rect,
-                    g_layout.unallocated_dice_table.column_min_x_values[i] + g_line_thickness,
-                    text_y, die_cell_width);
-            }
-            for (size_t i = 0; i < g_layout.trait_table.row_count; ++i)
-            {
-                text_y += g_table_row_height;
-                Trait*trait = g_traits + i;
-                draw_string(trait->name, &g_window_rect,
-                    g_layout.trait_table.column_min_x_values[0] + g_line_thickness + g_text_padding,
-                    text_y);
-                for (size_t die_index = 0; die_index < ARRAY_COUNT(trait->dice); ++die_index)
-                {
-                    draw_uint8(&g_window_rect, trait->dice[die_index],
-                        g_layout.unallocated_dice_table.column_min_x_values[die_index] +
-                        g_line_thickness + g_text_padding, text_y);
-                }
-            }
-        }
-        else
-        {
-            select_table_row(&g_skill_table_viewport, &g_selected_skill_index,
-                ARRAY_COUNT(g_skills), g_skill_table.column_min_x_values[0], g_skill_table.min_y,
-                skill_table_width, SKILL_TABLE_ID);
-            if (g_selected_skill_index < ARRAY_COUNT(g_skills))
-            {
-                draw_filled_rectangle(&g_skill_table_viewport,
-                    g_line_thickness + g_skill_table.column_min_x_values[1],
-                    g_line_thickness + g_skill_table.min_y +
-                        g_selected_skill_index * g_table_row_height,
-                    g_skill_table.column_min_x_values[2] -
-                        (g_skill_table.column_min_x_values[1] + g_line_thickness),
-                    cell_height, g_white);
-            }
-            if (g_selected_skill_index < ARRAY_COUNT(g_skills))
-            {
-                Skill*selected_skill = g_skills + g_selected_skill_index;
-                if (g_unallocated_marks && selected_skill->mark_count < 3)
-                {
-                    if (do_button_action(&g_window_rect, ALLOCATE_BUTTON_ID,
-                        g_allocate_button_min_x, g_allocate_button_min_y, g_table_row_height,
-                        g_table_row_height))
-                    {
-                        ++selected_skill->mark_count;
-                        --g_unallocated_marks;
-                    }
-                    allocate_button_border_color = g_black;
-                }
-                if (selected_skill->mark_count)
-                {
-                    if (do_button_action(&g_window_rect, DEALLOCATE_BUTTON_ID,
-                        g_deallocate_button_min_x, g_deallocate_button_min_y, g_table_row_height,
-                        g_table_row_height))
-                    {
-                        --selected_skill->mark_count;
-                        ++g_unallocated_marks;
-                    }
-                    deallocate_button_border_color = g_black;
-                }
-            }
-            draw_rectangle_outline(g_layout.unallocated_marks_display_min_x,
-                g_layout.unallocated_marks_display_min_y, g_layout.unallocated_marks_display_width,
-                g_table_row_height, g_black);
-            int32_t text_x =
-                g_layout.unallocated_marks_display_min_x + g_line_thickness + g_text_padding;
-            int32_t text_y = g_deallocate_button_min_y - g_text_padding;
-            draw_string("Unallocated Marks", &g_window_rect, text_x, text_y);
-            draw_uint8(&g_window_rect, g_unallocated_marks, text_x, text_y + g_table_row_height);
-        }
-        draw_grid(&g_skill_table_dice_header);
-        draw_horizontally_centered_string("Dice", &g_window_rect,
-            g_skill_table.column_min_x_values[2] + g_line_thickness, cell_height - g_text_padding,
-            get_grid_width(&g_skill_table_dice_header) - g_line_thickness);
-        uint32_t die_column_width_with_both_borders = g_die_column_width + g_line_thickness;
-        int32_t text_y = skill_table_frame_min_y - g_text_padding;
-        for (size_t i = 2; i < g_skill_table.column_count; ++i)
-        {
-            draw_horizontally_centered_string(g_die_denominations[i - 2], &g_window_rect,
-                g_skill_table.column_min_x_values[i], text_y, die_column_width_with_both_borders);
-        }
-        draw_grid_dividers(&g_skill_table_viewport, &g_skill_table);
-        draw_rectangle_outline(g_skill_table.column_min_x_values[0], skill_table_frame_min_y,
-            skill_table_width, g_skill_table_viewport.height + g_line_thickness, g_black);
-        draw_horizontally_centered_string("Skills", &g_window_rect,
-            g_skill_table.column_min_x_values[0], text_y,
-            g_skill_table.column_min_x_values[1] + g_line_thickness -
+        draw_horizontally_centered_string(g_die_denominations[i - 2], &g_window_rect,
+            g_skill_table.column_min_x_values[i], text_y, die_column_width_with_both_borders);
+    }
+    draw_grid_dividers(&g_skill_table_viewport, &g_skill_table);
+    draw_rectangle_outline(g_skill_table.column_min_x_values[0], skill_table_frame_min_y,
+        skill_table_width, g_skill_table_viewport.height + g_line_thickness, g_black);
+    draw_horizontally_centered_string("Skills", &g_window_rect,
+        g_skill_table.column_min_x_values[0], text_y,
+        g_skill_table.column_min_x_values[1] + g_line_thickness -
             g_skill_table.column_min_x_values[0]);
-        draw_string("Marks", &g_window_rect,
+    draw_string("Marks", &g_window_rect,
+        g_skill_table.column_min_x_values[1] + g_line_thickness + g_text_padding, text_y);
+    int32_t skill_text_x = g_skill_table.column_min_x_values[0] + g_line_thickness + g_text_padding;
+    text_y = g_skill_table.min_y - g_text_padding;
+    for (size_t i = 0; i < ARRAY_COUNT(g_skills); ++i)
+    {
+        text_y += g_table_row_height;
+        Skill*skill = g_skills + i;
+        draw_string(skill->name, &g_skill_table_viewport, skill_text_x, text_y);
+        draw_uint8(&g_skill_table_viewport, skill->mark_count,
             g_skill_table.column_min_x_values[1] + g_line_thickness + g_text_padding, text_y);
-        int32_t skill_text_x =
-            g_skill_table.column_min_x_values[0] + g_line_thickness + g_text_padding;
-        text_y = g_skill_table.min_y - g_text_padding;
-        for (size_t i = 0; i < ARRAY_COUNT(g_skills); ++i)
+        uint8_t die_counts[ARRAY_COUNT(g_die_denominations)] = { 0 };
+        if (skill->mark_count)
         {
-            text_y += g_table_row_height;
-            Skill*skill = g_skills + i;
-            draw_string(skill->name, &g_skill_table_viewport, skill_text_x, text_y);
-            draw_uint8(&g_skill_table_viewport, skill->mark_count,
-                g_skill_table.column_min_x_values[1] + g_line_thickness + g_text_padding, text_y);
-            uint8_t die_counts[ARRAY_COUNT(g_die_denominations)] = { 0 };
-            if (skill->mark_count)
-            {
-                ++die_counts[skill->mark_count - 1];
-            }
-            for (size_t die_index = 0; die_index < ARRAY_COUNT(g_die_denominations); ++die_index)
-            {
-                draw_uint8(&g_skill_table_viewport, die_counts[die_index],
-                    g_skill_table.column_min_x_values[2 + die_index] + g_line_thickness +
-                        g_text_padding, text_y);
-            }
+            ++die_counts[skill->mark_count - 1];
         }
-        if (allocate_button_border_color.value == g_black.value)
+        for (size_t die_index = 0; die_index < ARRAY_COUNT(g_die_denominations); ++die_index)
         {
-            draw_rectangle_outline(g_deallocate_button_min_x, g_deallocate_button_min_y,
-                g_table_row_height, g_table_row_height, deallocate_button_border_color);
-            draw_rectangle_outline(g_allocate_button_min_x, g_allocate_button_min_y,
-                g_table_row_height, g_table_row_height, allocate_button_border_color);
-        }
-        else
-        {
-            draw_rectangle_outline(g_allocate_button_min_x, g_allocate_button_min_y,
-                g_table_row_height, g_table_row_height, allocate_button_border_color);
-            draw_rectangle_outline(g_deallocate_button_min_x, g_deallocate_button_min_y,
-                g_table_row_height, g_table_row_height, deallocate_button_border_color);
-        }
-        draw_rasterization(&g_window_rect, g_deallocate_button_arrow,
-            g_deallocate_button_min_x + (g_table_row_height + g_line_thickness -
-                g_right_arrowhead_rasterization.bitmap.width) / 2,
-            g_deallocate_button_min_y + (g_table_row_height + g_line_thickness -
-                g_right_arrowhead_rasterization.bitmap.rows) / 2, deallocate_button_border_color);
-        draw_rasterization(&g_window_rect, g_allocate_button_arrow,
-            g_allocate_button_min_x + (g_table_row_height + g_line_thickness -
-                g_left_arrowhead_rasterization.bitmap.width) / 2,
-            g_allocate_button_min_y + (g_table_row_height + g_line_thickness -
-                g_left_arrowhead_rasterization.bitmap.rows) / 2, allocate_button_border_color);
-        StretchDIBits(device_context, 0, 0, g_window_rect.width, g_window_rect.height, 0, 0,
-            g_window_rect.width, g_window_rect.height, g_pixels, &g_pixel_buffer_info,
-            DIB_RGB_COLORS, SRCCOPY);
-        g_left_mouse_button_changed_state = false;
-        g_120ths_of_mouse_wheel_notches_turned = 0;
-        if (!g_left_mouse_button_is_down)
-        {
-            g_clicked_control_id = NULL_CONTROL_ID;
+            draw_uint8(&g_skill_table_viewport, die_counts[die_index],
+                g_skill_table.column_min_x_values[2 + die_index] + g_line_thickness +
+                    g_text_padding,
+                text_y);
         }
     }
-    return 0;
+    if (allocate_button_border_color.value == g_black.value)
+    {
+        draw_rectangle_outline(g_deallocate_button_min_x, g_deallocate_button_min_y,
+            g_table_row_height, g_table_row_height, deallocate_button_border_color);
+        draw_rectangle_outline(g_allocate_button_min_x, g_allocate_button_min_y, g_table_row_height,
+            g_table_row_height, allocate_button_border_color);
+    }
+    else
+    {
+        draw_rectangle_outline(g_allocate_button_min_x, g_allocate_button_min_y, g_table_row_height,
+            g_table_row_height, allocate_button_border_color);
+        draw_rectangle_outline(g_deallocate_button_min_x, g_deallocate_button_min_y,
+            g_table_row_height, g_table_row_height, deallocate_button_border_color);
+    }
+    draw_rasterization(&g_window_rect, g_deallocate_button_arrow,
+        g_deallocate_button_min_x + (g_table_row_height + g_line_thickness -
+            g_right_arrowhead_rasterization.bitmap.width) / 2,
+        g_deallocate_button_min_y + (g_table_row_height + g_line_thickness -
+            g_right_arrowhead_rasterization.bitmap.rows) / 2, deallocate_button_border_color);
+    draw_rasterization(&g_window_rect, g_allocate_button_arrow,
+        g_allocate_button_min_x + (g_table_row_height + g_line_thickness -
+            g_left_arrowhead_rasterization.bitmap.width) / 2,
+        g_allocate_button_min_y + (g_table_row_height + g_line_thickness -
+            g_left_arrowhead_rasterization.bitmap.rows) / 2, allocate_button_border_color);
+    g_left_mouse_button_changed_state = false;
+    g_120ths_of_mouse_wheel_notches_turned = 0;
+    if (!g_left_mouse_button_is_down)
+    {
+        g_clicked_control_id = NULL_CONTROL_ID;
+    }
 }

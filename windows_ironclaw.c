@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <windowsx.h>
 
+size_t copy_font_data_to_stack_cursor(HWND window_handle, WORD dpi);
+
 #define SET_MESSAGE_FONT_SIZE(dpi)\
 {\
     NONCLIENTMETRICSW non_client_metrics;\
@@ -131,8 +133,7 @@ HWND init(HINSTANCE instance_handle)
 int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handle,
     PWSTR command_line, int show)
 {
-    HWND window_handle = init(instance_handle);
-    HDC device_context = GetDC(window_handle);
+    HDC device_context = GetDC(init(instance_handle));
     MSG msg;
     while (GetMessage(&msg, 0, 0, 0))
     {

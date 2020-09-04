@@ -400,67 +400,97 @@ typedef struct ScrollBar
     bool is_active;
 } ScrollBar;
 
+typedef struct ScrollGeometryData
+{
+    uint32_t trough_width;
+    uint32_t thumb_width;
+    uint32_t thumb_height;
+    uint32_t max_thumb_offset;
+    uint32_t max_viewport_offset;
+} ScrollGeometryData;
+
+ScrollGeometryData get_scroll_geometry_data(ScrollBar*scroll)
+{
+    ScrollGeometryData out;
+    out.trough_width = g_table_row_height - g_line_thickness;
+    uint32_t trough_height_without_border = scroll->height - 2 * g_line_thickness;
+    out.thumb_width = out.trough_width - 2 * g_line_thickness;
+    out.thumb_height =
+        (trough_height_without_border * scroll->viewport.height) / scroll->content_height;
+    out.max_thumb_offset = trough_height_without_border - out.thumb_height;
+    out.max_viewport_offset = scroll->content_height - scroll->viewport.height;
+    return out;
+}
+
+uint32_t get_thumb_offset(ScrollBar*scroll, ScrollGeometryData*data)
+{
+    return (data->max_thumb_offset * scroll->content_offset + data->max_viewport_offset / 2) /
+        data->max_viewport_offset;
+}
+
 bool update_scroll_bar_offset(ScrollBar*scroll, int32_t min_x, int32_t min_y, uint32_t scroll_id)
 {
     if (scroll->is_active)
     {
         uint32_t old_content_offset = scroll->content_offset;
+        ScrollGeometryData data = get_scroll_geometry_data(scroll);
         int32_t thumb_min_x = min_x + g_line_thickness;
-        uint32_t trough_width = g_table_row_height - g_line_thickness;
-        draw_filled_rectangle(&g_window_rect, min_x, min_y, trough_width, scroll->height, 
-            g_light_gray);
-        uint32_t thumb_width = trough_width - 2 * g_line_thickness;
-        uint32_t trough_height_without_border = scroll->height - 2 * g_line_thickness;
-        uint32_t thumb_height =
-            (trough_height_without_border * scroll->viewport.height) / scroll->content_height;
-        uint32_t max_thumb_offset = trough_height_without_border - thumb_height;
-        uint32_t max_viewport_offset = scroll->content_height - scroll->viewport.height;
         int32_t thumb_min_y = min_y + g_line_thickness;
         if (g_cursor_x >= scroll->viewport.min_x &&
-            g_cursor_x < scroll->viewport.min_x + scroll->viewport.height &&
+            g_cursor_x < scroll->viewport.min_x + scroll->viewport.width &&
             g_cursor_y >= scroll->viewport.min_y &&
             g_cursor_y < scroll->viewport.min_y + scroll->viewport.height)
         {
             scroll->content_offset = max32(0,
                 scroll->content_offset - (g_120ths_of_mouse_wheel_notches_turned *
                 (int32_t)(g_text_lines_per_mouse_wheel_notch * g_table_row_height)) / 120);
+            g_120ths_of_mouse_wheel_notches_turned = 0;
         }
         if (g_left_mouse_button_is_down && g_clicked_control_id == scroll_id)
         {
             int32_t thumb_offset =
-                (max_thumb_offset * scroll->content_offset + max_viewport_offset / 2) /
-                max_viewport_offset + g_cursor_y - scroll->previous_cursor_y;
+                get_thumb_offset(scroll, &data) + g_cursor_y - scroll->previous_cursor_y;
             if (thumb_offset > 0)
             {
-                thumb_offset = min32(thumb_offset, max_thumb_offset);
+                thumb_offset = min32(thumb_offset, data.max_thumb_offset);
             }
             else
             {
                 thumb_offset = 0;
             }
             thumb_min_y += thumb_offset;
-            scroll->content_offset =
-                (max_viewport_offset * thumb_offset + max_thumb_offset / 2) / max_thumb_offset;
+            scroll->content_offset = (data.max_viewport_offset * thumb_offset +
+                data.max_thumb_offset / 2) / data.max_thumb_offset;
             scroll->previous_cursor_y = g_cursor_y;
         }
         else
         {
-            scroll->content_offset = min32(scroll->content_offset, max_viewport_offset);
-            thumb_min_y += (max_thumb_offset * scroll->content_offset + max_viewport_offset / 2) /
-                max_viewport_offset;
+            scroll->content_offset = min32(scroll->content_offset, data.max_viewport_offset);
+            thumb_min_y += get_thumb_offset(scroll, &data);
             if (g_left_mouse_button_is_down && g_left_mouse_button_changed_state &&
-                g_cursor_x >= thumb_min_x && g_cursor_x < thumb_min_x + thumb_width &&
-                g_cursor_y >= thumb_min_y && g_cursor_y < thumb_min_y + thumb_height)
+                g_cursor_x >= thumb_min_x && g_cursor_x < thumb_min_x + data.thumb_width &&
+                g_cursor_y >= thumb_min_y && g_cursor_y < thumb_min_y + data.thumb_height)
             {
                 g_clicked_control_id = scroll_id;
                 scroll->previous_cursor_y = g_cursor_y;
             }
         }
-        draw_filled_rectangle(&g_window_rect, thumb_min_x, thumb_min_y, thumb_width,
-            thumb_height, g_dark_gray);
         return old_content_offset != scroll->content_offset;
     }
     return false;
+}
+
+void draw_scroll_bar(ScrollBar*scroll, int32_t min_x, int32_t min_y)
+{
+    if (scroll->is_active)
+    {
+        ScrollGeometryData data = get_scroll_geometry_data(scroll);
+        draw_filled_rectangle(&g_window_rect, min_x, min_y, data.trough_width, scroll->height,
+            g_light_gray);
+        draw_filled_rectangle(&g_window_rect, min_x + g_line_thickness,
+            min_y + g_line_thickness + get_thumb_offset(scroll, &data), data.thumb_width,
+            data.thumb_height, g_dark_gray);
+    }
 }
 
 ScrollBar g_tab_vertical_scroll;
@@ -550,6 +580,7 @@ void scale_window_contents(void*font_data, size_t font_data_size, uint16_t dpi)
 
 int32_t g_skill_table_column_min_x_values[3 + ARRAY_COUNT(g_die_denominations)];
 Grid g_skill_table;
+int32_t g_skill_table_frame_min_y;
 Grid g_skill_table_dice_header;
 int32_t g_allocate_button_min_x;
 int32_t g_allocate_button_min_y;
@@ -611,6 +642,7 @@ void format_skill_table(int32_t min_x, int32_t min_y, int32_t max_y_floor)
             g_skill_table.column_min_x_values[i] + g_die_column_width;
     }
     g_skill_table.min_y = min_y - g_skill_table_scroll.content_offset;
+    g_skill_table_frame_min_y = g_skill_table_dice_header.min_y + g_table_row_height;
     g_skill_table_scroll.viewport.min_x = g_skill_table.column_min_x_values[0] + g_line_thickness;
     g_skill_table_scroll.viewport.width = get_grid_width(&g_skill_table) - g_line_thickness;
 }
@@ -738,10 +770,22 @@ void handle_message(void)
     {
         g_pixels[i].value = g_dark_gray.value;
     }
+    uint32_t cell_height = g_table_row_height - g_line_thickness;
+    if (update_scroll_bar_offset(&g_skill_table_scroll,
+        g_skill_table.column_min_x_values[0] - cell_height, g_skill_table_frame_min_y,
+        SKILL_TABLE_SCROLL_ID))
+    {
+        format_window();
+    }
+    if (update_scroll_bar_offset(&g_tab_vertical_scroll, 0, 0, TAB_VERTCAL_SCROLL_ID))
+    {
+        format_window();
+    }
+    draw_scroll_bar(&g_tab_vertical_scroll, 0, 0);
     int32_t tab_cell_min_x = g_window_rect.width - g_tab_width;
     uint32_t tab_cell_width = g_tab_width - g_line_thickness;
     int32_t tab_min_x = tab_cell_min_x - g_line_thickness;
-    int32_t tab_min_y = -(int32_t)g_line_thickness;
+    int32_t tab_min_y = -(g_line_thickness + g_tab_vertical_scroll.content_offset);
     if (select_table_row(&g_window_rect, &g_selected_tab_index, ARRAY_COUNT(g_tab_names), tab_min_x,
         tab_min_y, g_tab_width, TAB_0_ID))
     {
@@ -757,22 +801,12 @@ void handle_message(void)
     }
     draw_filled_rectangle(&g_window_rect, tab_min_x, 0, g_line_thickness, g_window_rect.height,
         g_black);
-    uint32_t cell_height = g_table_row_height - g_line_thickness;
-    draw_filled_rectangle(&g_window_rect, tab_min_x, g_selected_tab_index * g_table_row_height,
+    draw_filled_rectangle(&g_window_rect, tab_min_x,
+        g_selected_tab_index * g_table_row_height - g_tab_vertical_scroll.content_offset,
         g_line_thickness, cell_height, g_dark_gray);
-    draw_filled_rectangle(&g_window_rect, g_window_rect.width - g_line_thickness, 0,
-        g_line_thickness, ARRAY_COUNT(g_tab_names) * g_table_row_height, g_black);
-    if (update_scroll_bar_offset(&g_tab_vertical_scroll, 0, 0, TAB_VERTCAL_SCROLL_ID))
-    {
-        format_window();
-    }
-    int32_t skill_table_frame_min_y = g_skill_table_dice_header.min_y + g_table_row_height;
-    if (update_scroll_bar_offset(&g_skill_table_scroll,
-        g_skill_table.column_min_x_values[0] - cell_height, skill_table_frame_min_y,
-        SKILL_TABLE_SCROLL_ID))
-    {
-        format_window();
-    }
+    draw_filled_rectangle(&g_window_rect, g_window_rect.width - g_line_thickness,
+        -g_tab_vertical_scroll.content_offset, g_line_thickness,
+        ARRAY_COUNT(g_tab_names) * g_table_row_height, g_black);
     uint32_t skill_table_width = get_grid_width(&g_skill_table);
     Color allocate_button_border_color = g_light_gray;
     Color deallocate_button_border_color = g_light_gray;
@@ -783,8 +817,10 @@ void handle_message(void)
     clipped_skill_table_viewport.height = min32(g_window_rect.height,
         g_skill_table_scroll.viewport.min_y + g_skill_table_scroll.viewport.height) -
         clipped_skill_table_viewport.min_y;
-    if (g_selected_tab_index == 0)
+    if (g_selected_tab_index == TAB_ALLOCATE_DICE)
     {
+        draw_scroll_bar(&g_skill_table_scroll, g_skill_table.column_min_x_values[0] - cell_height,
+            g_skill_table_frame_min_y);
         int32_t unallocated_dice_table_cell_min_x =
             g_layout.unallocated_dice_table.column_min_x_values[0] + g_line_thickness;
         if (g_cursor_x >= unallocated_dice_table_cell_min_x)
@@ -795,7 +831,7 @@ void handle_message(void)
             {
                 if (do_button_action(&g_window_rect,
                     g_layout.unallocated_dice_table.column_min_x_values[die_index],
-                    skill_table_frame_min_y, g_die_column_width, unallocated_dice_table_height,
+                    g_skill_table_frame_min_y, g_die_column_width, unallocated_dice_table_height,
                     UNALLOCATED_DICE_TABLE_COLUMN_0_ID + die_index))
                 {
                     g_selected_die_denomination_index = die_index;
@@ -808,7 +844,7 @@ void handle_message(void)
                 do_button_action(&g_window_rect,
                     g_layout.unallocated_dice_table.column_min_x_values[
                         g_clicked_control_id - UNALLOCATED_DICE_TABLE_COLUMN_0_ID],
-                    skill_table_frame_min_y, g_die_column_width, unallocated_dice_table_height,
+                    g_skill_table_frame_min_y, g_die_column_width, unallocated_dice_table_height,
                     g_clicked_control_id);
             }
         }
@@ -817,7 +853,7 @@ void handle_message(void)
         {
             draw_filled_rectangle(&g_window_rect, g_layout.unallocated_dice_table.
                 column_min_x_values[g_selected_die_denomination_index] + g_line_thickness,
-                skill_table_frame_min_y + g_line_thickness + g_table_row_height, die_cell_width,
+                g_skill_table_frame_min_y + g_line_thickness + g_table_row_height, die_cell_width,
                 cell_height, g_white);
         }
         select_table_row(&g_window_rect, &g_selected_trait_index, ARRAY_COUNT(g_traits),
@@ -861,7 +897,7 @@ void handle_message(void)
         }
         draw_grid(&g_layout.unallocated_dice_table);
         int32_t cell_x = g_layout.unallocated_dice_table.column_min_x_values[0] + g_line_thickness;
-        int32_t text_y = skill_table_frame_min_y - g_text_padding;
+        int32_t text_y = g_skill_table_frame_min_y - g_text_padding;
         uint32_t unallocated_dice_cells_width =
             get_grid_width(&g_layout.unallocated_dice_table) - g_line_thickness;
         draw_horizontally_centered_string("Unallocated Dice", &g_window_rect, cell_x, text_y,
@@ -962,14 +998,14 @@ void handle_message(void)
         g_skill_table_dice_header.min_y - g_text_padding,
         get_grid_width(&g_skill_table_dice_header) - g_line_thickness);
     uint32_t die_column_width_with_both_borders = g_die_column_width + g_line_thickness;
-    int32_t text_y = skill_table_frame_min_y - g_text_padding;
+    int32_t text_y = g_skill_table_frame_min_y - g_text_padding;
     for (size_t i = 2; i < g_skill_table.column_count; ++i)
     {
         draw_horizontally_centered_string(g_die_denominations[i - 2], &g_window_rect,
             g_skill_table.column_min_x_values[i], text_y, die_column_width_with_both_borders);
     }
     draw_grid_dividers(&clipped_skill_table_viewport, &g_skill_table);
-    draw_rectangle_outline(g_skill_table.column_min_x_values[0], skill_table_frame_min_y,
+    draw_rectangle_outline(g_skill_table.column_min_x_values[0], g_skill_table_frame_min_y,
         skill_table_width, g_skill_table_scroll.viewport.height + g_line_thickness, g_black);
     draw_horizontally_centered_string("Skills", &g_window_rect,
         g_skill_table.column_min_x_values[0], text_y,

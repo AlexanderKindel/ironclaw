@@ -33,7 +33,7 @@ size_t copy_font_data_to_stack_cursor(HWND window_handle, WORD dpi);
 
 #define COMMIT_PAGE(address) VirtualAlloc(address, g_page_size, MEM_COMMIT, PAGE_READWRITE)
 
-#include "ironclaw.c"
+#include "create_character_window.c"
 
 size_t copy_font_data_to_stack_cursor(HWND window_handle, WORD dpi)
 {
@@ -50,6 +50,7 @@ size_t copy_font_data_to_stack_cursor(HWND window_handle, WORD dpi)
     return font_file_size;
 }
 
+HDC g_device_context;
 BITMAPINFO g_pixel_buffer_info;
 
 LRESULT CALLBACK create_character_proc(HWND window_handle, UINT message, WPARAM w_param,
@@ -64,9 +65,9 @@ LRESULT CALLBACK create_character_proc(HWND window_handle, UINT message, WPARAM 
         FT_Done_Face(g_face);
         WORD dpi = HIWORD(w_param);
         g_stack.cursor = g_stack.start;
-        scale_window_contents(g_stack.cursor, copy_font_data_to_stack_cursor(window_handle, dpi),
+        scale_graphics_to_dpi(g_stack.start, copy_font_data_to_stack_cursor(window_handle, dpi),
             dpi);
-        format_window();
+        reset_widget_positions();
         RECT*client_rect = (RECT*)l_param;
         SetWindowPos(window_handle, 0, client_rect->left, client_rect->top,
             client_rect->right - client_rect->left, client_rect->bottom - client_rect->top,
@@ -90,19 +91,33 @@ LRESULT CALLBACK create_character_proc(HWND window_handle, UINT message, WPARAM 
         g_120ths_of_mouse_wheel_notches_turned = GET_WHEEL_DELTA_WPARAM(w_param);
         return 0;
     case WM_SIZE:
-    {
-        RECT client_rect;
-        GetClientRect(window_handle, &client_rect);
-        g_window_rect.width = client_rect.right - client_rect.left;
-        g_window_rect.height = client_rect.bottom - client_rect.top;
-        g_pixel_buffer_info.bmiHeader.biWidth = g_window_rect.width;
-        g_pixel_buffer_info.bmiHeader.biHeight = -(int32_t)g_window_rect.height;
+        g_window_x_extent.length = LOWORD(l_param);
+        g_window_y_extent.length = HIWORD(l_param);
+        g_pixel_buffer_info.bmiHeader.biWidth = g_window_x_extent.length;
+        g_pixel_buffer_info.bmiHeader.biHeight = -(int32_t)g_window_y_extent.length;
         VirtualFree(g_pixels, 0, MEM_RELEASE);
-        g_pixels = VirtualAlloc(0, sizeof(Color) * g_window_rect.width * g_window_rect.height,
-            MEM_COMMIT, PAGE_READWRITE);
-        format_window();
+        g_pixels = VirtualAlloc(0,
+            sizeof(Color) * g_window_x_extent.length * g_window_y_extent.length, MEM_COMMIT,
+            PAGE_READWRITE);
+        reformat_widgets_on_window_resize();
+        handle_message();
+        StretchDIBits(g_device_context, 0, 0, g_window_x_extent.length, g_window_y_extent.length, 0,
+            0, g_window_x_extent.length, g_window_y_extent.length, g_pixels, &g_pixel_buffer_info,
+            DIB_RGB_COLORS, SRCCOPY);
         return 0;
-    }
+    case WM_KEYDOWN:
+        if (w_param = VK_SHIFT)
+        {
+            g_shift_is_down = true;
+            return 0;
+        }
+        break;
+    case WM_KEYUP:
+        if (w_param = VK_SHIFT)
+        {
+            g_shift_is_down = false;
+            return 0;
+        }
     }
     return DefWindowProc(window_handle, message, w_param, l_param);
 }
@@ -133,15 +148,15 @@ HWND init(HINSTANCE instance_handle)
 int WINAPI wWinMain(HINSTANCE instance_handle, HINSTANCE previous_instance_handle,
     PWSTR command_line, int show)
 {
-    HDC device_context = GetDC(init(instance_handle));
+    g_device_context = GetDC(init(instance_handle));
     MSG msg;
     while (GetMessage(&msg, 0, 0, 0))
     {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
         handle_message();
-        StretchDIBits(device_context, 0, 0, g_window_rect.width, g_window_rect.height, 0, 0,
-            g_window_rect.width, g_window_rect.height, g_pixels, &g_pixel_buffer_info,
+        StretchDIBits(g_device_context, 0, 0, g_window_x_extent.length, g_window_y_extent.length, 0,
+            0, g_window_x_extent.length, g_window_y_extent.length, g_pixels, &g_pixel_buffer_info,
             DIB_RGB_COLORS, SRCCOPY);
     }
     return 0;

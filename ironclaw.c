@@ -90,6 +90,7 @@ typedef union Color
     uint32_t value;
 } Color;
 
+size_t g_pixel_buffer_capacity;
 Color*g_pixels;
 Interval g_window_x_extent;
 Interval g_window_y_extent;

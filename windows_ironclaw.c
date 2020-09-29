@@ -95,10 +95,14 @@ LRESULT CALLBACK create_character_proc(HWND window_handle, UINT message, WPARAM 
         g_window_y_extent.length = HIWORD(l_param);
         g_pixel_buffer_info.bmiHeader.biWidth = g_window_x_extent.length;
         g_pixel_buffer_info.bmiHeader.biHeight = -(int32_t)g_window_y_extent.length;
-        VirtualFree(g_pixels, 0, MEM_RELEASE);
-        g_pixels = VirtualAlloc(0,
-            sizeof(Color) * g_window_x_extent.length * g_window_y_extent.length, MEM_COMMIT,
-            PAGE_READWRITE);
+        size_t new_pixel_buffer_capacity =
+            GetSystemMetrics(SM_CXVIRTUALSCREEN) * GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        if (new_pixel_buffer_capacity > g_pixel_buffer_capacity)
+        {
+            VirtualFree(g_pixels, 0, MEM_RELEASE);
+            g_pixels = VirtualAlloc(0, sizeof(Color) * new_pixel_buffer_capacity, MEM_COMMIT,
+                PAGE_READWRITE);
+        }
         reformat_widgets_on_window_resize();
         handle_message();
         StretchDIBits(g_device_context, 0, 0, g_window_x_extent.length, g_window_y_extent.length, 0,

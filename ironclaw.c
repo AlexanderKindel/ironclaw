@@ -522,3 +522,18 @@ void draw_vertical_scroll_bar(Interval clip_x_extent, Interval clip_y_extent, Sc
             data.thumb_thickness, data.thumb_length, g_dark_gray);
     }
 }
+
+Interval intersect_intervals(Interval a, Interval b)
+{
+    Interval out;
+    out.min = max32(a.min, b.min);
+    out.length = min32(a.min + a.length, b.min + b.length) - out.min;
+    return out;
+}
+
+void intersect_viewports(Interval x_extent_a, Interval y_extent_a, Interval x_extent_b,
+    Interval y_extent_b, Interval*x_extent_out, Interval*y_extent_out)
+{
+    *x_extent_out = intersect_intervals(x_extent_a, x_extent_b);
+    *y_extent_out = intersect_intervals(y_extent_a, y_extent_b);
+}

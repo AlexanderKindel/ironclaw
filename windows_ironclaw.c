@@ -102,6 +102,7 @@ LRESULT CALLBACK create_character_proc(HWND window_handle, UINT message, WPARAM 
             VirtualFree(g_pixels, 0, MEM_RELEASE);
             g_pixels = VirtualAlloc(0, sizeof(Color) * new_pixel_buffer_capacity, MEM_COMMIT,
                 PAGE_READWRITE);
+            g_pixel_buffer_capacity = new_pixel_buffer_capacity;
         }
         reformat_widgets_on_window_resize();
         handle_message();

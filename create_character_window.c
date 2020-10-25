@@ -859,6 +859,14 @@ void handle_message(void)
                 g_gift_list_width - g_line_thickness, cell_height, g_white);
             if (g_free_gifts_chosen_count < ARRAY_COUNT(g_free_gift_indices))
             {
+                for (size_t i = 0; i < g_free_gifts_chosen_count; ++i)
+                {
+                    if (g_free_gift_indices[i] == g_selected_gift_index &&
+                        !(g_gifts[g_selected_gift_index].descriptor_flags & DESCRIPTOR_MULTIPLE))
+                    {
+                        goto requirement_not_satisfied;
+                    }
+                }
                 Gift*selected_gift = g_gifts + g_selected_gift_index;
                 for (size_t i = 0; i < selected_gift->requirement_count; ++i)
                 {

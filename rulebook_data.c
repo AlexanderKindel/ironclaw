@@ -45,7 +45,11 @@ enum TraitIndex
 
 Trait g_traits[] = { TRAITS(MAKE_VALUE) };
 
-#define DESCRIPTOR_INFLUENCE 0x1
+enum GiftDescriptor
+{
+    DESCRIPTOR_INFLUENCE = 0b1,
+    DESCRIPTOR_MULTIPLE = 0b10
+};
 
 enum RequirementIndex
 {
@@ -189,7 +193,7 @@ macro(GIFT_NOBILITY,\
             .requirement_type = REQUIREMENT_TEXT_JUSTIFICATION\
         }\
     },\
-    DESCRIPTOR_INFLUENCE, 1\
+    DESCRIPTOR_INFLUENCE | DESCRIPTOR_MULTIPLE, 1\
 }))\
 macro(GIFT_ORATORY, ({ "Oratory" }))\
 macro(GIFT_ORDAINMENT,\
@@ -202,7 +206,7 @@ macro(GIFT_ORDAINMENT,\
             .requirement_type = REQUIREMENT_TEXT_JUSTIFICATION\
         }\
     },\
-    DESCRIPTOR_INFLUENCE, 1\
+    DESCRIPTOR_INFLUENCE | DESCRIPTOR_MULTIPLE, 1\
 }))\
 macro(GIFT_PERFORMANCE, ({ "Performance" }))\
 macro(GIFT_SEDUCTION, ({ "Seduction" }))\
@@ -219,7 +223,7 @@ macro(GIFT_WEALTH,\
             .requirement_type = REQUIREMENT_TEXT_JUSTIFICATION\
         }\
     },\
-    DESCRIPTOR_INFLUENCE, 1\
+    DESCRIPTOR_INFLUENCE | DESCRIPTOR_MULTIPLE, 1\
 }))\
 macro(GIFT_ARCHERS_TRAPPINGS, ({ "Archer's Trappings" }))\
 macro(GIFT_CLERICS_TRAPPINGS, ({ "Cleric's Trappings" }))\
@@ -338,7 +342,7 @@ macro(GIFT_SHIELD_SAVE,\
     },\
     0, 2\
 }))\
-macro(GIFT_TOUGHNESS, ({ "Toughness" }))\
+macro(GIFT_TOUGHNESS, ({ "Toughness", 0, DESCRIPTOR_MULTIPLE }))\
 macro(GIFT_EXTRA_CAREER,\
 ({\
     "Extra Career",\
@@ -361,9 +365,9 @@ macro(GIFT_FAVOR_BONUS,\
     },\
     0, 1\
 }))\
-macro(GIFT_INCREASED_TRAIT, ({ "Increased Trait" }))\
+macro(GIFT_INCREASED_TRAIT, ({ "Increased Trait", 0, DESCRIPTOR_MULTIPLE }))\
 macro(GIFT_KNACK, ({ "Knack" }))\
-macro(GIFT_LUCK, ({ "Luck" }))\
+macro(GIFT_LUCK, ({ "Luck", 0, DESCRIPTOR_MULTIPLE }))\
 macro(GIFT_PERSONALITY, ({ "Personality" }))\
 macro(GIFT_DEEP_DIVING, ({ "Deep Diving" }))\
 macro(GIFT_ECHOLOCATION, ({ "Echolocation" }))\
@@ -398,7 +402,7 @@ macro(GIFT_IMPROVED_ALLY,\
             .requirement_type = REQUIREMENT_GIFT\
         }\
     },\
-    0, 1\
+    DESCRIPTOR_MULTIPLE, 1\
 }))\
 macro(GIFT_AMBIDEXTERITY, ({ "Ambidexterity" }))\
 macro(GIFT_AKIMBO_FIGHTER,\
@@ -888,7 +892,7 @@ macro(GIFT_FORGERY,\
             .requirement_type = REQUIREMENT_GIFT\
         }\
     },\
-    0, 1\
+    DESCRIPTOR_MULTIPLE, 1\
 }))\
 macro(GIFT_SABOTAGE,\
 ({\
